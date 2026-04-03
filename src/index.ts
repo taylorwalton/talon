@@ -323,13 +323,13 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
     if (result.status === 'success') {
       queue.notifyIdle(chatJid);
+      await channel.onTurnComplete?.(chatJid);
     }
 
     if (result.status === 'error') {
       hadError = true;
     }
   });
-
   await channel.setTyping?.(chatJid, false);
   if (idleTimer) clearTimeout(idleTimer);
 

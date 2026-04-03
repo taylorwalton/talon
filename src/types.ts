@@ -93,6 +93,10 @@ export interface Channel {
   disconnect(): Promise<void>;
   // Optional: typing indicator. Channels that support it implement it.
   setTyping?(jid: string, isTyping: boolean): Promise<void>;
+  // Optional: called when the agent finishes a turn (result.status === 'success').
+  // Fired before the container goes idle — lets channels close streams without
+  // waiting for the idle timeout.
+  onTurnComplete?(jid: string): Promise<void>;
   // Optional: sync group/chat names from the platform.
   syncGroups?(force: boolean): Promise<void>;
 }

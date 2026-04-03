@@ -10,7 +10,6 @@ import {
   CONTAINER_IMAGE,
   CONTAINER_MAX_OUTPUT_SIZE,
   CONTAINER_TIMEOUT,
-  CREDENTIAL_PROXY_PORT,
   DATA_DIR,
   GROUPS_DIR,
   IDLE_TIMEOUT,
@@ -18,6 +17,7 @@ import {
   ONECLI_URL,
   TIMEZONE,
 } from './config.js';
+import { readEnvFile } from './env.js';
 import { resolveGroupFolderPath, resolveGroupIpcPath } from './group-folder.js';
 import { logger } from './logger.js';
 import {
@@ -259,6 +259,16 @@ async function buildContainerArgs(
   });
   if (onecliApplied) {
     logger.info({ containerName }, 'OneCLI gateway config applied');
+  } else {
+    const { CLAUDE_CODE_OAUTH_TOKEN } = readEnvFile(['CLAUDE_CODE_OAUTH_TOKEN']);
+    if (CLAUDE_CODE_OAUTH_TOKEN) {
+      // Long-lived OAuth token (generated via `claude setup-token`) — inject
+      // directly so containers authenticate without a separate login.
+      args.push('-e', `CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN}`);
+      logger.info({ containerName }, 'Injecting CLAUDE_CODE_OAUTH_TOKEN into container');
+    } else {
+      logger.warn({ containerName }, 'No credentials available — container may fail to authenticate');
+    }
   }
 
   // Runtime-specific args for host gateway resolution

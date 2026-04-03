@@ -23,7 +23,14 @@ RUN apt-get update && apt-get install -y \
     libxshmfence1 \
     curl \
     git \
+    python3 \
+    python3-pip \
+    python3-venv \
     && rm -rf /var/lib/apt/lists/*
+
+# Install opensearch-mcp-server into a system venv (used by the SIEM MCP wrapper)
+RUN python3 -m venv /opt/opensearch-mcp \
+    && /opt/opensearch-mcp/bin/pip install --quiet opensearch-mcp-server
 
 # Set Chromium path for agent-browser
 ENV AGENT_BROWSER_EXECUTABLE_PATH=/usr/bin/chromium

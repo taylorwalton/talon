@@ -149,6 +149,97 @@ Key files:
 - `src/db.ts` - SQLite operations (messages, groups, sessions, state)
 - `groups/*/CLAUDE.md` - Per-group memory
 
+## SOC Agent (CoPilot) Deployment
+
+This fork includes a built-in HTTP channel and SOC agent group (`groups/copilot/`) that exposes NanoClaw as an API for the [CoPilot gateway](https://github.com/socfortress/copilot-gateway). Agents have live access to a Wazuh/OpenSearch SIEM via MCP tools.
+
+### Client Setup
+
+**Prerequisites:** Claude Code CLI, Docker, Node.js 20+, Git, a running OpenSearch/Wazuh SIEM.
+
+**1. Clone and install**
+```bash
+git clone <your-fork-url> nanoclaw
+cd nanoclaw
+npm install && npm run build
+```
+
+**2. Get a Claude OAuth token**
+
+This allows agents to authenticate inside their containers without an interactive login:
+```bash
+claude setup-token
+# Copy the sk-ant-oat01-... token that is printed
+```
+
+**3. Create `.env`**
+```bash
+cat > .env <<EOF
+CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-...
+EOF
+```
+
+**4. Create the mount allowlist**
+
+This controls which host directories can be mounted into agent containers. It must live outside the project root so agents cannot modify it:
+```bash
+mkdir -p ~/.config/nanoclaw
+cat > ~/.config/nanoclaw/mount-allowlist.json <<EOF
+{
+  "allowedRoots": [
+    {
+      "path": "$(pwd)",
+      "allowReadWrite": false,
+      "description": "NanoClaw project root"
+    }
+  ],
+  "blockedPatterns": [],
+  "nonMainReadOnly": true
+}
+EOF
+```
+
+**5. Configure SIEM credentials**
+```bash
+cp siem/.env.example siem/.env
+# Edit siem/.env — set OPENSEARCH_HOSTS, OPENSEARCH_USERNAME, OPENSEARCH_PASSWORD
+```
+
+**6. Build the container**
+```bash
+CONTAINER_RUNTIME=docker ./container/build.sh
+```
+
+**7. Start the service**
+```bash
+# macOS
+cp com.nanoclaw.plist ~/Library/LaunchAgents/
+launchctl load ~/Library/LaunchAgents/com.nanoclaw.plist
+
+# Linux
+cp nanoclaw.service ~/.config/systemd/user/
+systemctl --user enable --now nanoclaw
+```
+
+**8. Verify**
+```bash
+curl http://localhost:3100/health
+curl -N -X POST http://localhost:3100/message \
+  -H "Content-Type: application/json" \
+  -d '{"message": "Check cluster health", "sender": "test"}'
+```
+
+### Per-Client Customization
+
+| File | Purpose |
+|------|---------|
+| `siem/.env` | OpenSearch credentials — gitignored, client-specific |
+| `groups/copilot/CLAUDE.md` | SOC agent identity, known assets, ongoing investigations |
+| `.env` | `CLAUDE_CODE_OAUTH_TOKEN` and other host credentials — gitignored |
+| `~/.config/nanoclaw/mount-allowlist.json` | Mount security policy — outside repo, tamper-proof |
+
+Append client-specific context (asset inventory, business hours, crown jewels) to the bottom of `groups/copilot/CLAUDE.md`.
+
 ## FAQ
 
 **Why Docker?**

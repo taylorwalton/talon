@@ -435,6 +435,24 @@ async function runQuery(
     log(`Additional directories: ${extraDirs.join(', ')}`);
   }
 
+  // Load group-specific MCP servers from .mcp.json in the group folder
+  type McpServerConfig = { command: string; args?: string[]; env?: Record<string, string> };
+  const groupMcpServers: Record<string, McpServerConfig> = {};
+  const mcpJsonPath = '/workspace/group/.mcp.json';
+  if (fs.existsSync(mcpJsonPath)) {
+    try {
+      const mcpJson = JSON.parse(fs.readFileSync(mcpJsonPath, 'utf-8')) as {
+        mcpServers?: Record<string, McpServerConfig>;
+      };
+      if (mcpJson.mcpServers) {
+        Object.assign(groupMcpServers, mcpJson.mcpServers);
+        log(`Loaded group MCP servers: ${Object.keys(groupMcpServers).join(', ')}`);
+      }
+    } catch (err) {
+      log(`Failed to parse .mcp.json: ${err}`);
+    }
+  }
+
   for await (const message of query({
     prompt: stream,
     options: {
@@ -469,6 +487,7 @@ async function runQuery(
         'Skill',
         'NotebookEdit',
         'mcp__nanoclaw__*',
+        'mcp__*',
       ],
       env: sdkEnv,
       permissionMode: 'bypassPermissions',
@@ -484,6 +503,7 @@ async function runQuery(
             NANOCLAW_IS_MAIN: containerInput.isMain ? '1' : '0',
           },
         },
+        ...groupMcpServers,
       },
       hooks: {
         PreCompact: [
