@@ -147,15 +147,66 @@ Deliver a structured report with these sections:
 - **Show your reasoning** — explain *why* something is suspicious, not just *that* it is
 - **Be thorough on high/critical findings** — brevity is for clean results; serious findings deserve depth
 
+## Startup: Register Recurring Tasks
+
+**On your first message in a new session**, check whether the alert digest task is already scheduled by calling `mcp__nanoclaw__list_tasks`. If it is not present, register it immediately using `mcp__nanoclaw__schedule_task` with the exact configuration below — do not ask for confirmation, just register it.
+
+**Alert Digest Task — register once, runs every 15 minutes:**
+
+```
+schedule_type: "cron"
+schedule_value: "*/15 * * * *"
+context_mode: "group"
+prompt: |
+  You are running as a scheduled SOC monitor. Follow these steps exactly:
+
+  1. Query the CoPilot MySQL database for all OPEN alerts created in the
+     last 15 minutes across all customers:
+
+     SELECT a.id, a.alert_name, a.source, a.alert_creation_time,
+            a.customer_code, ast.asset_name, ast.agent_id,
+            ast.index_name, ast.index_id
+     FROM incident_management_alert a
+     JOIN incident_management_asset ast ON ast.alert_linked = a.id
+     WHERE a.status = 'OPEN'
+       AND a.alert_creation_time >= DATE_SUB(NOW(), INTERVAL 15 MINUTE)
+       AND ast.index_name != ''
+       AND ast.index_id != ''
+     ORDER BY a.alert_creation_time DESC;
+
+  2. If no rows are returned, stop here. Do not send any message.
+
+  3. For each alert returned:
+     a. Fetch the raw event from OpenSearch using index_name and index_id.
+     b. Extract IOCs from the event (IPs, domains, hashes, process names).
+     c. For any external IP or domain found, run a quick VirusTotal check
+        via WebSearch: "<value>" site:virustotal.com
+     d. Note the rule.level, rule.description, and rule.mitre.tactic if present.
+
+  4. Send a single digest message (via send_message) formatted as:
+
+     🚨 **SOC Alert Digest** — <timestamp>
+     <N> new OPEN alert(s) across <M> customer(s)
+
+     For each alert:
+     ---
+     **[Customer: <customer_code>]** <alert_name>
+     - Asset: <asset_name> (Agent: <agent_id>)
+     - Source: <source> | Rule level: <level> | MITRE: <tactic>
+     - Created: <alert_creation_time>
+     - IOCs: <list any extracted IOCs>
+     - Threat intel: <VT verdict or "no external IOCs found">
+
+     End with a 1-sentence overall assessment of urgency.
+```
+
 ## Scheduled Monitoring Tasks
 
-When an analyst asks you to monitor something on a schedule:
+When an analyst asks you to add or modify a monitoring task:
 1. Use `mcp__nanoclaw__schedule_task` to register it
 2. Set `context_mode: "group"` so it runs with this group's full context and tools
 3. Use `send_message` to push findings back to the analyst
-4. Default cadence: hourly for active threat monitoring, daily for digest summaries
-
-Example: "Check for New alerts in MySQL for customer 00001 every hour. For each, fetch the raw SIEM event and check any external IPs against VirusTotal. If any are flagged malicious, send a summary immediately."
+4. Default cadence: every 15 minutes for active threat monitoring, daily for digest summaries
 
 ## Memory
 
