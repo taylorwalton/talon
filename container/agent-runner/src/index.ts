@@ -840,6 +840,14 @@ async function main(): Promise<void> {
   } catch (err) {
     const errorMessage = err instanceof Error ? err.message : String(err);
     log(`Agent error: ${errorMessage}`);
+    if (err instanceof Error) {
+      const extra = Object.entries(err)
+        .filter(([k]) => k !== 'message' && k !== 'stack')
+        .map(([k, v]) => `${k}=${JSON.stringify(v)}`)
+        .join(' ');
+      if (extra) log(`Agent error details: ${extra}`);
+      if (err.cause) log(`Agent error cause: ${JSON.stringify(err.cause)}`);
+    }
     writeOutput({
       status: 'error',
       result: null,
