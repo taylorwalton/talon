@@ -9,10 +9,58 @@ You have read access to the **CoPilot** application database — the SOCfortress
 3. **Use `LIMIT`** — large tables (`incident_management_alert`, `agents`, `log_entries`) can have millions of rows. Start with 20–100 unless the user asks for more.
 4. **Lead with the answer** — state the finding first, then show the supporting data.
 
+## Alert → Asset → OpenSearch: Full Detail Workflow
+
+Every CoPilot alert can be traced back to the raw SIEM event in OpenSearch. The bridge is `incident_management_asset`:
+
+```
+incident_management_alert
+    ↓  (via incident_management_asset.alert_linked)
+incident_management_asset
+    ├── index_name  →  OpenSearch index  (e.g. new-wazuh_110)
+    └── index_id    →  OpenSearch document _id  (e.g. 8feb28e2-4f86-11ef-97f7-8600007a2218)
+```
+
+**When to use this:** Any time the user asks for full alert details, raw log context, field-level data, or anything beyond what's stored in MySQL — the MySQL record is a summary; the full event lives in OpenSearch.
+
+**Step-by-step:**
+
+1. Query `incident_management_alert` to identify the alert(s) of interest.
+2. Join to `incident_management_asset` on `alert_linked = alert.id` to get `index_name` and `index_id`.
+3. Use the OpenSearch `get_document` tool with `index=index_name` and `id=index_id` to retrieve the full raw event document.
+
+**Example join:**
+```sql
+SELECT
+  a.id AS alert_id,
+  a.alert_name,
+  a.source,
+  a.status,
+  a.customer_code,
+  ast.asset_name,
+  ast.agent_id,
+  ast.index_name,
+  ast.index_id
+FROM incident_management_alert a
+JOIN incident_management_asset ast ON ast.alert_linked = a.id
+WHERE a.customer_code = 'customer_code_here'
+  AND a.status != 'CLOSED'
+ORDER BY a.alert_creation_time DESC
+LIMIT 20;
+```
+
+**Then fetch the raw event from OpenSearch** using the `index_name` and `index_id` from each row:
+- `index_name` — the OpenSearch index (e.g. `new-wazuh_110`, `wazuh-alerts-4.x-2024.01.15`)
+- `index_id` — the document `_id` (UUID format, e.g. `8feb28e2-4f86-11ef-97f7-8600007a2218`)
+
+**Note:** Some asset rows have empty `index_name`/`index_id` (test data or manually created assets). Skip those and only fetch documents where both fields are non-empty.
+
 ## Key Relationships
 
 - **`customer_code`** — the central tenant key. Present in almost every table. Join via `customers.customer_code`.
 - **`agent_id`** — Wazuh agent ID. Links `agents` → `agent_datastore`, `agent_vulnerabilities`, `incident_management_asset`.
+- **`incident_management_asset.alert_linked`** — FK to `incident_management_alert.id`. Contains `index_name` and `index_id` for OpenSearch document lookup.
+- Alert status values: `New`, `In Progress`, `CLOSED` (and possibly others — check `status` column for live values).
 - Alerts link to cases via `incident_management_casealertlink` (many-to-many).
 - Alerts link to IOCs via `incident_management_alert_to_ioc` (many-to-many).
 - Users link to customers via `user_customer_access` (many-to-many).
@@ -80,14 +128,27 @@ Key fields: `agent_id`, `artifact_name`, `flow_id`, `collection_time`, `status`,
 **`incident_management_alert`** — the primary alert table
 | Column | Notes |
 |--------|-------|
-| `alert_name`, `alert_description` | mediumtext |
-| `status` | open/closed/in_progress/etc. |
+| `id` | PK — used to join to `incident_management_asset.alert_linked` |
+| `alert_name`, `alert_description` | mediumtext — human-readable summary |
+| `status` | `New`, `In Progress`, `CLOSED` |
 | `alert_creation_time` | When the alert was created |
 | `customer_code` | Tenant |
 | `source` | `wazuh`, `office365`, `crowdstrike`, etc. |
-| `assigned_to` | Analyst username |
+| `assigned_to` | Analyst username, nullable |
 | `escalated` | Boolean |
 | `time_closed` | nullable |
+
+**`incident_management_asset`** — links an alert to the raw SIEM event in OpenSearch
+| Column | Notes |
+|--------|-------|
+| `id` | PK |
+| `alert_linked` | FK → `incident_management_alert.id` (nullable for unlinked assets) |
+| `asset_name` | Hostname or asset identifier |
+| `agent_id` | Wazuh agent ID, nullable |
+| `velociraptor_id` | Velociraptor agent ID, nullable |
+| `customer_code` | Tenant |
+| `index_name` | OpenSearch index containing the raw event (e.g. `new-wazuh_110`) |
+| `index_id` | OpenSearch document `_id` (UUID) — use with `get_document` to fetch full event |
 
 **`incident_management_case`** — grouped investigations
 Key fields: `case_name`, `case_description`, `case_status`, `assigned_to`, `customer_code`, `escalated`, `case_creation_time`, `case_closed_time`
@@ -230,6 +291,33 @@ SELECT integration_service_name, deployed
 FROM customer_integrations
 WHERE customer_code = 'customer_code_here'
 ORDER BY integration_service_name;
+```
+
+### Alert → asset → OpenSearch (full event detail)
+```sql
+-- Step 1: get alerts with their OpenSearch pointers
+SELECT
+  a.id AS alert_id,
+  a.alert_name,
+  a.source,
+  a.status,
+  a.alert_creation_time,
+  ast.asset_name,
+  ast.agent_id,
+  ast.index_name,
+  ast.index_id
+FROM incident_management_alert a
+JOIN incident_management_asset ast ON ast.alert_linked = a.id
+WHERE a.customer_code = 'customer_code_here'
+  AND ast.index_name != ''
+  AND ast.index_id != ''
+ORDER BY a.alert_creation_time DESC
+LIMIT 20;
+
+-- Step 2: for each row, fetch the raw event from OpenSearch using:
+--   index  = index_name  (e.g. new-wazuh_110)
+--   id     = index_id    (e.g. 8feb28e2-4f86-11ef-97f7-8600007a2218)
+-- Use the OpenSearch get_document MCP tool with those two values.
 ```
 
 ### Alert → case linkage
