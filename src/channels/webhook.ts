@@ -1,3 +1,4 @@
+import { readEnvFile } from '../env.js';
 import { logger } from '../logger.js';
 import { registerChannel, ChannelOpts } from './registry.js';
 import { Channel, RegisteredGroup } from '../types.js';
@@ -17,8 +18,9 @@ export class WebhookChannel implements Channel {
 
   constructor(opts: ChannelOpts) {
     this.opts = opts;
-    this.url = process.env.WEBHOOK_URL || null;
-    this.secret = process.env.WEBHOOK_SECRET || null;
+    const env = readEnvFile(['WEBHOOK_URL', 'WEBHOOK_SECRET']);
+    this.url = process.env.WEBHOOK_URL || env.WEBHOOK_URL || null;
+    this.secret = process.env.WEBHOOK_SECRET || env.WEBHOOK_SECRET || null;
   }
 
   async connect(): Promise<void> {
@@ -50,7 +52,9 @@ export class WebhookChannel implements Channel {
 
   async sendMessage(_jid: string, text: string): Promise<void> {
     if (!this.url) {
-      logger.warn('Webhook channel: sendMessage called but WEBHOOK_URL is not set');
+      logger.warn(
+        'Webhook channel: sendMessage called but WEBHOOK_URL is not set',
+      );
       return;
     }
 
@@ -74,7 +78,10 @@ export class WebhookChannel implements Channel {
           'Webhook channel: POST returned non-2xx',
         );
       } else {
-        logger.info({ url: this.url, length: text.length }, 'Webhook channel: message delivered');
+        logger.info(
+          { url: this.url, length: text.length },
+          'Webhook channel: message delivered',
+        );
       }
     } catch (err) {
       logger.error({ err, url: this.url }, 'Webhook channel: POST failed');
