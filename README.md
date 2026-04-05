@@ -176,6 +176,11 @@ claude setup-token
 ```bash
 cat > .env <<EOF
 CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-...
+
+# Optional: webhook endpoint for the 15-minute SOC alert digest
+# If set, the scheduled digest task POSTs results here as JSON: { "text": "...", "timestamp": "..." }
+# WEBHOOK_URL=https://your-endpoint.example.com/nanoclaw-digest
+# WEBHOOK_SECRET=optional-bearer-token
 EOF
 ```
 
@@ -297,7 +302,7 @@ curl -N -X POST http://localhost:3100/message \
 | `siem/.env` | OpenSearch credentials — gitignored, client-specific |
 | `mysql/.env` | CoPilot MySQL credentials — gitignored, client-specific |
 | `groups/copilot/CLAUDE.md` | SOC agent identity, known assets, ongoing investigations |
-| `.env` | `CLAUDE_CODE_OAUTH_TOKEN` and other host credentials — gitignored |
+| `.env` | `CLAUDE_CODE_OAUTH_TOKEN`, `WEBHOOK_URL`, `WEBHOOK_SECRET` — gitignored |
 | `~/.config/nanoclaw/mount-allowlist.json` | Mount security policy — outside repo, tamper-proof |
 
 Append client-specific context (asset inventory, business hours, crown jewels) to the bottom of `groups/copilot/CLAUDE.md`.

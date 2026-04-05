@@ -17,45 +17,12 @@
 import fs from 'fs';
 import path from 'path';
 import { execFile } from 'child_process';
-import { createRequire } from 'module';
 import {
   query,
   HookCallback,
   PreCompactHookInput,
 } from '@anthropic-ai/claude-agent-sdk';
 import { fileURLToPath } from 'url';
-
-// ---------------------------------------------------------------------------
-// DEBUG: intercept child_process.spawn to capture SDK subprocess stderr.
-// The SDK spawns its embedded cli.js and only reports the exit code, hiding
-// the actual error message. This wrapper tees stderr so we can see why it
-// exits with code 1. Remove once root cause is identified.
-// ---------------------------------------------------------------------------
-{
-  const _require = createRequire(import.meta.url);
-  const cp = _require('child_process') as typeof import('child_process');
-  const _origSpawn = cp.spawn.bind(cp) as typeof cp.spawn;
-  (cp as unknown as Record<string, unknown>).spawn = function debugSpawn(
-    cmd: string,
-    argsOrOpts?: string[] | import('child_process').SpawnOptions,
-    opts?: import('child_process').SpawnOptions,
-  ) {
-    const args = Array.isArray(argsOrOpts) ? argsOrOpts : [];
-    const spawnOpts = (Array.isArray(argsOrOpts) ? opts : argsOrOpts) ?? {};
-    const shortCmd = cmd.length > 120 ? '...' + cmd.slice(-120) : cmd;
-    console.error(`[spawn-debug] cmd=${shortCmd} args=${JSON.stringify(args)}`);
-    const child = (_origSpawn as (cmd: string, args: string[], opts: object) => ReturnType<typeof cp.spawn>)(cmd, args, spawnOpts);
-    if (child.stderr) {
-      child.stderr.on('data', (d: Buffer) => {
-        console.error(`[spawn-debug stderr] ${d.toString().trim()}`);
-      });
-    }
-    child.on('exit', (code: number | null, sig: string | null) => {
-      console.error(`[spawn-debug exit] code=${code} signal=${sig}`);
-    });
-    return child;
-  };
-}
 
 interface ContainerInput {
   prompt: string;
@@ -676,9 +643,7 @@ async function main(): Promise<void> {
 
   // Credentials are injected by the host's credential proxy via ANTHROPIC_BASE_URL.
   // No real secrets exist in the container environment.
-  // DEBUG_CLAUDE_AGENT_SDK=1 causes the SDK to pipe cli.js stderr instead of ignoring it,
-  // so we can see the actual error message when the process exits with code 1.
-  const sdkEnv: Record<string, string | undefined> = { ...process.env, DEBUG_CLAUDE_AGENT_SDK: '1' };
+  const sdkEnv: Record<string, string | undefined> = { ...process.env };
 
   const __dirname = path.dirname(fileURLToPath(import.meta.url));
   const mcpServerPath = path.join(__dirname, 'ipc-mcp-stdio.js');

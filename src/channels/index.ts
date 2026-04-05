@@ -17,3 +17,6 @@ import './emacs.js';
 
 // http (CoPilot gateway)
 import './http.js';
+
+// webhook (outbound POST for scheduled task output)
+import './webhook.js';

@@ -1,8 +1,11 @@
 import http from 'http';
 import path from 'path';
 
+import { createTask, getTaskById } from '../db.js';
 import { logger } from '../logger.js';
+import { computeNextRun } from '../task-scheduler.js';
 import { registerChannel, ChannelOpts } from './registry.js';
+import { WEBHOOK_JID } from './webhook.js';
 import { Channel, RegisteredGroup } from '../types.js';
 
 const COPILOT_JID = process.env.COPILOT_JID || 'http:copilot';
@@ -26,6 +29,68 @@ export class HttpChannel implements Channel {
 
   constructor(opts: ChannelOpts) {
     this.opts = opts;
+  }
+
+  private seedAlertDigestTask(): void {
+    const TASK_ID = 'copilot-alert-digest-15m';
+    if (getTaskById(TASK_ID)) return;
+
+    const task = {
+      id: TASK_ID,
+      group_folder: COPILOT_GROUP_FOLDER,
+      chat_jid: WEBHOOK_JID,
+      schedule_type: 'cron' as const,
+      schedule_value: '*/15 * * * *',
+      context_mode: 'group' as const,
+      status: 'active' as const,
+      created_at: new Date().toISOString(),
+      next_run: null as string | null,
+      prompt: `You are running as a scheduled SOC monitor. Follow these steps exactly:
+
+1. Query the CoPilot MySQL database for all OPEN alerts created in the
+   last 15 minutes across all customers:
+
+   SELECT a.id, a.alert_name, a.source, a.alert_creation_time,
+          a.customer_code, ast.asset_name, ast.agent_id,
+          ast.index_name, ast.index_id
+   FROM incident_management_alert a
+   JOIN incident_management_asset ast ON ast.alert_linked = a.id
+   WHERE a.status = 'OPEN'
+     AND a.alert_creation_time >= DATE_SUB(NOW(), INTERVAL 15 MINUTE)
+     AND ast.index_name != ''
+     AND ast.index_id != ''
+   ORDER BY a.alert_creation_time DESC;
+
+2. If no rows are returned, stop here. Do not send any message.
+
+3. For each alert returned:
+   a. Fetch the raw event from OpenSearch using index_name and index_id.
+   b. Extract IOCs from the event (IPs, domains, hashes, process names).
+   c. For any external IP or domain found, run a quick VirusTotal check
+      via WebSearch: "<value>" site:virustotal.com
+   d. Note the rule.level, rule.description, and rule.mitre.tactic if present.
+
+4. Send a single digest message (via send_message) formatted as:
+
+   🚨 **SOC Alert Digest** — <timestamp>
+   <N> new OPEN alert(s) across <M> customer(s)
+
+   For each alert:
+   ---
+   **[Customer: <customer_code>]** <alert_name>
+   - Asset: <asset_name> (Agent: <agent_id>)
+   - Source: <source> | Rule level: <level> | MITRE: <tactic>
+   - Created: <alert_creation_time>
+   - IOCs: <list any extracted IOCs>
+   - Threat intel: <VT verdict or "no external IOCs found">
+
+   End with a 1-sentence overall assessment of urgency.`,
+    };
+
+    const fullTask = { ...task, last_run: null, last_result: null };
+    fullTask.next_run = computeNextRun(fullTask);
+    createTask(fullTask);
+    logger.info({ taskId: TASK_ID }, 'Seeded CoPilot alert digest scheduled task');
   }
 
   async connect(): Promise<void> {
@@ -55,6 +120,7 @@ export class HttpChannel implements Channel {
       },
     };
     this.opts.registerGroup?.(COPILOT_JID, group);
+    this.seedAlertDigestTask();
 
     this.opts.onChatMetadata(
       COPILOT_JID,
