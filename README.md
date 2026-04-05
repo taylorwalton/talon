@@ -155,7 +155,7 @@ This fork includes a built-in HTTP channel and SOC agent group (`groups/copilot/
 
 ### Client Setup
 
-**Prerequisites:** Claude Code CLI, Docker, Node.js 20+, Git, a running OpenSearch/Wazuh SIEM.
+**Prerequisites:** Claude Code CLI, Docker, Node.js 20+, Git, a running OpenSearch/Wazuh SIEM, a running CoPilot MySQL/MariaDB instance.
 
 **1. Clone and install**
 ```bash
@@ -205,12 +205,18 @@ cp siem/.env.example siem/.env
 # Edit siem/.env — set OPENSEARCH_HOSTS, OPENSEARCH_USERNAME, OPENSEARCH_PASSWORD
 ```
 
-**6. Build the container**
+**6. Configure MySQL credentials**
+```bash
+bash mysql/setup.sh
+# Edit mysql/.env — set MYSQL_HOST, MYSQL_PORT, MYSQL_USER, MYSQL_PASS, MYSQL_DB
+```
+
+**7. Build the container**
 ```bash
 CONTAINER_RUNTIME=docker ./container/build.sh
 ```
 
-**7. Start the service**
+**8. Start the service**
 
 macOS:
 ```bash
@@ -276,7 +282,7 @@ systemctl --user enable --now nanoclaw
 loginctl enable-linger  # keep service running after SSH logout
 ```
 
-**8. Verify**
+**9. Verify**
 ```bash
 curl http://localhost:3100/health
 curl -N -X POST http://localhost:3100/message \
@@ -289,6 +295,7 @@ curl -N -X POST http://localhost:3100/message \
 | File | Purpose |
 |------|---------|
 | `siem/.env` | OpenSearch credentials — gitignored, client-specific |
+| `mysql/.env` | CoPilot MySQL credentials — gitignored, client-specific |
 | `groups/copilot/CLAUDE.md` | SOC agent identity, known assets, ongoing investigations |
 | `.env` | `CLAUDE_CODE_OAUTH_TOKEN` and other host credentials — gitignored |
 | `~/.config/nanoclaw/mount-allowlist.json` | Mount security policy — outside repo, tamper-proof |
