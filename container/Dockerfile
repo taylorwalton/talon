@@ -36,8 +36,8 @@ RUN python3 -m venv /opt/opensearch-mcp \
 ENV AGENT_BROWSER_EXECUTABLE_PATH=/usr/bin/chromium
 ENV PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium
 
-# Install agent-browser and claude-code globally
-RUN npm install -g agent-browser @anthropic-ai/claude-code@2.1.91
+# Install agent-browser, claude-code, and MySQL MCP server globally
+RUN npm install -g agent-browser @anthropic-ai/claude-code@2.1.91 @benborla29/mcp-server-mysql
 
 # Create app directory
 WORKDIR /app

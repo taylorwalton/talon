@@ -46,6 +46,11 @@ export class HttpChannel implements Channel {
             containerPath: 'siem',
             readonly: true,
           },
+          {
+            hostPath: path.join(process.cwd(), 'mysql'),
+            containerPath: 'mysql',
+            readonly: true,
+          },
         ],
       },
     };

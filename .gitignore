@@ -18,6 +18,7 @@ groups/main/*
 groups/global/*
 groups/copilot/*
 !groups/main/CLAUDE.md
+!groups/main/.mcp.json
 !groups/global/CLAUDE.md
 !groups/copilot/CLAUDE.md
 !groups/copilot/.mcp.json
@@ -25,6 +26,8 @@ groups/copilot/*
 # Secrets
 *.keys.json
 .env
+siem/.env
+mysql/.env
 
 # Temp files
 .tmp-*

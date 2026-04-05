@@ -16,6 +16,7 @@ Your detailed query workflow, index patterns, field references, and DSL examples
 
 **Active tools:**
 - `mcp__opensearch__*` — query, search, and aggregate SIEM data
+- `mcp__mysql__*` — query the connected MySQL/MariaDB database (credentials in `mysql/.env`)
 - `WebSearch`, `WebFetch` — threat intelligence lookups (VirusTotal, Shodan, CVE databases)
 - `Bash` — process data, run scripts (sandboxed in this container)
 - `mcp__nanoclaw__schedule_task` — schedule recurring sweeps and alerts
