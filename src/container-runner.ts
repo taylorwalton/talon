@@ -136,6 +136,13 @@ function buildVolumeMounts(
     '.claude',
   );
   fs.mkdirSync(groupSessionsDir, { recursive: true });
+  // When running as root, make writable mount dirs accessible to the container's
+  // node user (uid 1000) — non-main containers always run as non-root.
+  if (!isMain && process.getuid?.() === 0) {
+    fs.chmodSync(groupSessionsDir, 0o777);
+    fs.mkdirSync(groupDir, { recursive: true });
+    fs.chmodSync(groupDir, 0o777);
+  }
   const settingsFile = path.join(groupSessionsDir, 'settings.json');
   if (!fs.existsSync(settingsFile)) {
     fs.writeFileSync(
@@ -183,6 +190,12 @@ function buildVolumeMounts(
   fs.mkdirSync(path.join(groupIpcDir, 'messages'), { recursive: true });
   fs.mkdirSync(path.join(groupIpcDir, 'tasks'), { recursive: true });
   fs.mkdirSync(path.join(groupIpcDir, 'input'), { recursive: true });
+  if (!isMain && process.getuid?.() === 0) {
+    fs.chmodSync(groupIpcDir, 0o777);
+    for (const sub of ['messages', 'tasks', 'input']) {
+      fs.chmodSync(path.join(groupIpcDir, sub), 0o777);
+    }
+  }
   mounts.push({
     hostPath: groupIpcDir,
     containerPath: '/workspace/ipc',
@@ -214,6 +227,9 @@ function buildVolumeMounts(
         fs.statSync(srcIndex).mtimeMs > fs.statSync(cachedIndex).mtimeMs);
     if (needsCopy) {
       fs.cpSync(agentRunnerSrc, groupAgentRunnerDir, { recursive: true });
+    }
+    if (!isMain && process.getuid?.() === 0) {
+      fs.chmodSync(groupAgentRunnerDir, 0o777);
     }
   }
   mounts.push({
@@ -283,20 +299,29 @@ async function buildContainerArgs(
   args.push(...hostGatewayArgs());
 
   // Run as host user so bind-mounted files are accessible.
-  // Skip when running as root (uid 0), as the container's node user (uid 1000),
-  // or when getuid is unavailable (native Windows without WSL).
+  // When getuid is unavailable (native Windows without WSL), skip user mapping.
   const hostUid = process.getuid?.();
   const hostGid = process.getgid?.();
-  if (hostUid != null && hostUid !== 0 && hostUid !== 1000) {
+  if (hostUid != null) {
     if (isMain) {
       // Main containers start as root so the entrypoint can mount --bind
       // to shadow .env. Privileges are dropped via setpriv in entrypoint.sh.
-      args.push('-e', `RUN_UID=${hostUid}`);
-      args.push('-e', `RUN_GID=${hostGid}`);
+      // When host is root (uid 0), main container stays root (no setpriv needed).
+      if (hostUid !== 0) {
+        args.push('-e', `RUN_UID=${hostUid}`);
+        args.push('-e', `RUN_GID=${hostGid}`);
+        args.push('-e', 'HOME=/home/node');
+      }
     } else {
-      args.push('--user', `${hostUid}:${hostGid}`);
+      // Non-main containers MUST NOT run as root — claude-code refuses to start
+      // as root even with --dangerously-skip-permissions. Always use the
+      // container's built-in 'node' user (uid 1000) as the minimum.
+      // When host runs as a regular user, match that uid instead for file access.
+      const containerUid = hostUid !== 0 ? hostUid : 1000;
+      const containerGid = hostGid != null && hostGid !== 0 ? hostGid : 1000;
+      args.push('--user', `${containerUid}:${containerGid}`);
+      args.push('-e', 'HOME=/home/node');
     }
-    args.push('-e', 'HOME=/home/node');
   }
 
   for (const mount of mounts) {
