@@ -5,6 +5,9 @@
     },
     "mysql": {
       "command": "/workspace/extra/mysql/mysql-mcp.sh"
+    },
+    "copilot": {
+      "command": "/workspace/extra/copilot-mcp/copilot-mcp.sh"
     }
   }
 }

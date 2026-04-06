@@ -148,6 +148,11 @@ export class HttpChannel implements Channel {
             containerPath: 'mysql',
             readonly: true,
           },
+          {
+            hostPath: path.join(process.cwd(), 'copilot-mcp'),
+            containerPath: 'copilot-mcp',
+            readonly: true,
+          },
         ],
       },
     };

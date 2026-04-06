@@ -173,8 +173,9 @@ Deliver a structured report with these sections:
 ## Capabilities
 
 **Active tools:**
-- `mcp__mysql__*` — CoPilot database: alerts, cases, agents, customers, integrations
+- `mcp__mysql__*` — CoPilot database (read-only): alerts, cases, agents, customers, integrations
 - `mcp__opensearch__*` — SIEM: raw events, aggregations, threat hunting
+- `mcp__copilot__*` — CoPilot REST API: write investigation results back to CoPilot (jobs, reports, IOCs), query customers and alerts. Use these tools to persist findings — never write directly to MySQL.
 - `WebSearch`, `WebFetch` — VirusTotal, Shodan, AbuseIPDB, MITRE ATT&CK, threat intel lookups
 - `Bash` — data processing, scripting (sandboxed in this container)
 - `mcp__nanoclaw__schedule_task` — schedule recurring sweeps and monitoring tasks
