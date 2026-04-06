@@ -216,12 +216,23 @@ bash mysql/setup.sh
 # Edit mysql/.env — set MYSQL_HOST, MYSQL_PORT, MYSQL_USER, MYSQL_PASS, MYSQL_DB
 ```
 
-**7. Build the container**
+**7. Configure CoPilot MCP credentials**
+```bash
+bash copilot-mcp/setup.sh
+# Edit copilot-mcp/.env — set COPILOT_URL, COPILOT_USERNAME, COPILOT_PASSWORD
+```
+
+> **Note:** If CoPilot is running on the same host as NanoClaw, use `host.docker.internal` instead of `127.0.0.1` so the agent container can reach it:
+> ```
+> COPILOT_URL=http://host.docker.internal:5000
+> ```
+
+**9. Build the container**
 ```bash
 CONTAINER_RUNTIME=docker ./container/build.sh
 ```
 
-**8. Start the service**
+**10. Start the service**
 
 macOS:
 ```bash
@@ -287,12 +298,19 @@ systemctl --user enable --now nanoclaw
 loginctl enable-linger  # keep service running after SSH logout
 ```
 
-**9. Verify**
+**11. Verify**
 ```bash
 curl http://localhost:3100/health
-curl -N -X POST http://localhost:3100/message \
+
+# Test SIEM connectivity
+curl -s -N -X POST http://localhost:3100/message \
   -H "Content-Type: application/json" \
   -d '{"message": "Check cluster health", "sender": "test"}'
+
+# Test CoPilot MCP connectivity
+curl -s -N -X POST http://localhost:3100/message \
+  -H "Content-Type: application/json" \
+  -d '{"message": "Use the copilot MCP tool to list all customers.", "sender": "test"}'
 ```
 
 ### Per-Client Customization
@@ -301,7 +319,9 @@ curl -N -X POST http://localhost:3100/message \
 |------|---------|
 | `siem/.env` | OpenSearch credentials — gitignored, client-specific |
 | `mysql/.env` | CoPilot MySQL credentials — gitignored, client-specific |
+| `copilot-mcp/.env` | CoPilot REST API credentials — gitignored, client-specific |
 | `groups/copilot/CLAUDE.md` | SOC agent identity, known assets, ongoing investigations |
+| `groups/copilot/prompts/` | Per-alert-type investigation templates (e.g. `sysmon_event_1.txt`) |
 | `.env` | `CLAUDE_CODE_OAUTH_TOKEN`, `WEBHOOK_URL`, `WEBHOOK_SECRET` — gitignored |
 | `~/.config/nanoclaw/mount-allowlist.json` | Mount security policy — outside repo, tamper-proof |
 
