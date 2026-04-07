@@ -199,28 +199,45 @@ The agent has **read-only** access to MySQL. All writes go through CoPilot REST 
 
 > **Status:** MCP tools under development in CoPilot. NanoClaw-side integration pending.
 
-### Planned MCP Tools
+### MCP Tools (from `github.com/socfortress/copilot-mcp-server`)
+
+**Customers**
 
 | Tool | Method + Path | Purpose |
 |------|--------------|---------|
-| `create_analyst_job` | `POST /api/v1/ai-analyst/jobs` | Register a new job when investigation starts |
-| `update_analyst_job` | `PATCH /api/v1/ai-analyst/jobs/{id}` | Update status (running → completed/failed) |
-| `submit_analyst_report` | `POST /api/v1/ai-analyst/reports` | Write the full investigation report |
-| `submit_analyst_iocs` | `POST /api/v1/ai-analyst/iocs` | Write extracted + enriched IOCs |
+| `GetCustomersTool` | `GET /api/customers` | List all customers visible to the authenticated user |
 
-### Example: `submit_analyst_report` payload
+**Jobs**
 
-```json
-{
-  "job_id": "copilot-inv-1234-abc",
-  "alert_id": 1234,
-  "customer_code": "acme",
-  "severity_assessment": "High",
-  "summary": "Suspicious PowerShell spawned by Word — likely phishing dropper.",
-  "report_markdown": "## Alert Summary\n...",
-  "recommended_actions": "Isolate host. Block hash on EDR. Escalate to IR."
-}
-```
+| Tool | Method + Path | Purpose |
+|------|--------------|---------|
+| `CreateAiAnalystJobTool` | `POST /api/ai_analyst/jobs` | Register a new investigation job |
+| `UpdateAiAnalystJobTool` | `PATCH /api/ai_analyst/jobs/{job_id}` | Update job status and metadata |
+| `GetAiAnalystJobTool` | `GET /api/ai_analyst/jobs/{job_id}` | Fetch a single job by ID |
+| `ListAiAnalystJobsByAlertTool` | `GET /api/ai_analyst/jobs/alert/{alert_id}` | List jobs for an alert (deduplication check) |
+| `ListAiAnalystJobsByCustomerTool` | `GET /api/ai_analyst/jobs/customer/{customer_code}` | List all jobs for a customer |
+
+**Reports**
+
+| Tool | Method + Path | Purpose |
+|------|--------------|---------|
+| `SubmitAiAnalystReportTool` | `POST /api/ai_analyst/reports` | Submit full investigation report; returns `report_id` |
+| `ListAiAnalystReportsByAlertTool` | `GET /api/ai_analyst/reports/alert/{alert_id}` | List reports for an alert |
+
+**IOCs**
+
+| Tool | Method + Path | Purpose |
+|------|--------------|---------|
+| `SubmitAiAnalystIocsTool` | `POST /api/ai_analyst/iocs` | Submit bulk extracted IOCs with VT verdicts |
+| `ListAiAnalystIocsByReportTool` | `GET /api/ai_analyst/iocs/report/{report_id}` | List IOCs for a report |
+| `ListAiAnalystIocsByAlertTool` | `GET /api/ai_analyst/iocs/alert/{alert_id}` | List all IOCs for an alert |
+| `ListAiAnalystIocsByCustomerTool` | `GET /api/ai_analyst/iocs/customer/{customer_code}` | List IOCs for a customer, filterable by `vt_verdict` |
+
+**Combined**
+
+| Tool | Method + Path | Purpose |
+|------|--------------|---------|
+| `GetAlertAiAnalysisTool` | `GET /api/ai_analyst/alert/{alert_id}` | Fetch complete bundle: job + latest report + all IOCs |
 
 ---
 

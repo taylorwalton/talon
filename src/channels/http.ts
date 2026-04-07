@@ -45,10 +45,9 @@ export class HttpChannel implements Channel {
       status: 'active' as const,
       created_at: new Date().toISOString(),
       next_run: null as string | null,
-      prompt: `You are running as a scheduled SOC monitor. Follow these steps exactly:
+      prompt: `You are running as a scheduled SOC monitor. Follow these steps exactly for each alert.
 
-1. Query the CoPilot MySQL database for all OPEN alerts created in the
-   last 15 minutes across all customers:
+1. Query MySQL for OPEN alerts with no completed AI investigation:
 
    SELECT a.id, a.alert_name, a.source, a.alert_creation_time,
           a.customer_code, ast.asset_name, ast.agent_id,
@@ -63,57 +62,72 @@ export class HttpChannel implements Channel {
 
 2. If no rows are returned, stop here. Do not send any message.
 
-3. For each alert, run a full investigation:
+3. For each alert:
 
-   a. In parallel, fetch from OpenSearch using index_name and index_id:
-      - get_document (index_name, index_id) → the full raw alert event
-      - get_index (index_name) → the field mapping for this index
-      Use the mapping to confirm exact field names and types (keyword vs text)
-      before building any search or aggregation query.
+   a. DEDUPLICATION — call ListAiAnalystJobsByAlertTool(alert_id=<id>).
+      If a job with status "completed" already exists, skip this alert.
 
-   b. Detect the alert type from the raw event (check in order):
-      - Look at rule.groups (array) for an entry matching sysmon_event_<N>
-        (e.g. sysmon_event_1, sysmon_event_3, sysmon_event_7).
+   b. REGISTER JOB — call CreateAiAnalystJobTool:
+        id="copilot-inv-<alert_id>-<unix_timestamp>"
+        alert_id=<id>, customer_code=<code>, triggered_by="scheduled"
+      Then immediately call UpdateAiAnalystJobTool(job_id=<id>, status="running").
+
+   c. FETCH INDEX MAPPING + RAW EVENT in parallel:
+      - get_document(index_name, index_id) → full raw alert event
+      - get_index(index_name) → field mapping (confirms field names and types)
+      Use the mapping before writing any OpenSearch query.
+
+   d. DETECT ALERT TYPE from the raw event:
+      - Check rule.groups array for an entry matching sysmon_event_<N>
       - If not found, map data.win.system.eventID:
-          1  → sysmon_event_1  (Process Creation)
-          3  → sysmon_event_3  (Network Connection)
-          7  → sysmon_event_7  (Image Load / DLL)
-          11 → sysmon_event_11 (File Create)
-          22 → sysmon_event_22 (DNS Query)
+          1→sysmon_event_1, 3→sysmon_event_3, 7→sysmon_event_7,
+          11→sysmon_event_11, 22→sysmon_event_22
 
-   c. Load the investigation template:
-      - Read /workspace/group/prompts/<alert_type>.txt
-        (e.g. /workspace/group/prompts/sysmon_event_1.txt)
-      - If the file exists, follow the analysis steps it defines.
-        Substitute template variables as follows:
-          {{ alert }}                      → the full raw OpenSearch event JSON
-          {{ event_id }}                   → the numeric event ID (e.g. 1)
-          {{ pipeline | default('wazuh') }} → wazuh
-          {{ virustotal_results }}         → your VT results after threat intel
-      - If no template file exists, use the default steps below.
+   e. LOAD TEMPLATE — Read /workspace/group/prompts/<alert_type>.txt.
+      If found, follow its steps substituting:
+        {{ alert }} → raw OpenSearch event JSON
+        {{ event_id }} → numeric event ID
+        {{ pipeline | default('wazuh') }} → wazuh
+        {{ virustotal_results }} → VT results after threat intel
+      If no template, use the default steps below.
 
-   d. Default investigation steps (when no template matches):
-      - Extract all IOCs from the raw event:
-          IPs     → data.win.eventdata.destinationIp, data.srcip, data.dstip
-          Domains → data.win.eventdata.queryName, data.win.eventdata.destinationHostname
-          Hashes  → data.win.eventdata.hashes (MD5, SHA1, SHA256)
-          Processes → data.win.eventdata.image, data.win.eventdata.parentImage
-          Commands  → data.win.eventdata.commandLine
-      - For each external IP or domain: WebSearch "<value>" site:virustotal.com
+   f. DEFAULT INVESTIGATION (when no template matches):
+      - Extract IOCs: IPs (data.win.eventdata.destinationIp, data.srcip, data.dstip),
+        domains (data.win.eventdata.queryName, data.win.eventdata.destinationHostname),
+        hashes (data.win.eventdata.hashes), processes (data.win.eventdata.image,
+        data.win.eventdata.parentImage), commands (data.win.eventdata.commandLine)
+      - For each external IP/domain: WebSearch "<value>" site:virustotal.com
       - For each SHA256 hash: WebFetch https://www.virustotal.com/gui/file/<hash>
-      - Note rule.level, rule.description, and rule.mitre.tactic
+      - Check rule.level, rule.description, rule.mitre.tactic
 
-   e. Send a full investigation report via send_message for each alert:
+   g. WRITE BACK TO COPILOT — call in order:
+      1. UpdateAiAnalystJobTool(job_id=<id>, status="completed",
+           template_used=<alert_type or null>)
+      2. SubmitAiAnalystReportTool(
+           job_id=<id>, alert_id=<id>, customer_code=<code>,
+           severity_assessment=<Critical|High|Medium|Low|Informational>,
+           summary=<1-2 sentence tl;dr>,
+           report_markdown=<full markdown report>,
+           recommended_actions=<action list>)
+         → note the returned report_id
+      3. SubmitAiAnalystIocsTool(
+           report_id=<from step 2>, alert_id=<id>, customer_code=<code>,
+           iocs=[{ ioc_value, ioc_type, vt_verdict, vt_score, details }, ...])
+         ioc_type: ip|domain|hash|process|url|user|command
+         vt_verdict: malicious|suspicious|clean|unknown
 
+   h. SEND REPORT via send_message:
       🔍 **SOC Investigation** — <alert_name>
       Customer: <customer_code> | Asset: <asset_name> | Created: <alert_creation_time>
+      **Severity**: <assessment> | **Template**: <alert_type or "default">
 
-      <Full investigation findings following the template format, or:>
-
-      **Alert Summary**: rule description, severity level, MITRE tactic/technique
+      **Alert Summary**: rule description, MITRE tactic/technique
       **IOC Analysis**: table of IOCs with type and VT verdict
-      **Severity Assessment**: Critical / High / Medium / Low with reasoning
-      **Recommended Actions**: specific, actionable next steps`,
+      **Severity Assessment**: reasoning
+      **Recommended Actions**: specific actionable steps
+
+      On any error during write-back, call UpdateAiAnalystJobTool with
+      status="failed" and error_message=<exception details>.`,
     };
 
     const fullTask = { ...task, last_run: null, last_result: null };

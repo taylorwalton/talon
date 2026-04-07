@@ -22,6 +22,27 @@ You do not just retrieve data — you **analyze** it, **correlate** it, and **ex
 
 ## Investigation Workflow
 
+### Step 0 — Check for an existing job and register a new one
+
+Before pulling the alert, check if this alert has already been investigated:
+```
+mcp__copilot__ListAiAnalystJobsByAlertTool(alert_id=<id>)
+```
+If a job with status `completed` already exists, skip this alert entirely — it has already been processed.
+
+If no job exists (or only failed ones), register a new job immediately:
+```
+mcp__copilot__CreateAiAnalystJobTool(
+  id=<generate a unique id, e.g. "copilot-inv-<alert_id>-<timestamp>">,
+  alert_id=<id>, customer_code=<code>,
+  triggered_by=<"scheduled"|"manual"|"webhook">
+)
+```
+Then update it to `running` once you start the investigation:
+```
+mcp__copilot__UpdateAiAnalystJobTool(job_id=<id>, status="running")
+```
+
 ### Step 1 — Pull the alert from MySQL
 
 Query `incident_management_alert` filtered by customer and status. Join `incident_management_asset` to get the OpenSearch pointers:
@@ -140,9 +161,48 @@ After enriching the IOC, look for additional context in the SIEM:
 
 Use targeted OpenSearch queries for each correlation check. Refer to `siem/CLAUDE.md` for field names and DSL patterns.
 
-### Step 6 — Write the investigation report
+### Step 6 — Write back to CoPilot and deliver the report
 
-Deliver a structured report with these sections:
+Run the write-back and the analyst message in parallel once analysis is complete.
+
+#### 6a — Persist to CoPilot via MCP tools (always do this)
+
+Call these tools in order:
+
+1. **Update job to `completed`** (or `failed` on error):
+   ```
+   mcp__copilot__UpdateAiAnalystJobTool(job_id=<id>, status="completed", template_used=<template key or null>)
+   ```
+
+2. **Submit the report** — returns a `report_id` you need for the IOC step:
+   ```
+   mcp__copilot__SubmitAiAnalystReportTool(
+     job_id=<id>, alert_id=<id>, customer_code=<code>,
+     severity_assessment=<Critical|High|Medium|Low|Informational>,
+     summary=<1-2 sentence tl;dr>,
+     report_markdown=<full structured report below>,
+     recommended_actions=<action list>
+   )
+   ```
+
+3. **Submit IOCs** — one call with all IOCs as a list:
+   ```
+   mcp__copilot__SubmitAiAnalystIocsTool(
+     report_id=<id from step 2>, alert_id=<id>, customer_code=<code>,
+     iocs=[
+       { ioc_value: "1.2.3.4", ioc_type: "ip", vt_verdict: "malicious", vt_score: "45/94", details: "..." },
+       { ioc_value: "evil.exe", ioc_type: "process", vt_verdict: "suspicious", ... },
+       ...
+     ]
+   )
+   ```
+
+   `ioc_type` must be one of: `ip`, `domain`, `hash`, `process`, `url`, `user`, `command`
+   `vt_verdict` must be one of: `malicious`, `suspicious`, `clean`, `unknown`
+
+#### 6b — Send the structured report to the analyst
+
+Deliver the report via `send_message` with these sections:
 
 ---
 
@@ -175,7 +235,15 @@ Deliver a structured report with these sections:
 **Active tools:**
 - `mcp__mysql__*` — CoPilot database (read-only): alerts, cases, agents, customers, integrations
 - `mcp__opensearch__*` — SIEM: raw events, aggregations, threat hunting
-- `mcp__copilot__*` — CoPilot REST API: write investigation results back to CoPilot (jobs, reports, IOCs), query customers and alerts. Use these tools to persist findings — never write directly to MySQL.
+- `mcp__copilot__*` — CoPilot REST API (never write MySQL directly — always use these):
+  - `GetCustomersTool` — list all customers
+  - `CreateAiAnalystJobTool` — register a new investigation job at the start of each investigation
+  - `UpdateAiAnalystJobTool` — update job status (`pending`→`running`→`completed`/`failed`)
+  - `GetAiAnalystJobTool` / `ListAiAnalystJobsByAlertTool` — check if an alert already has a job (deduplication)
+  - `SubmitAiAnalystReportTool` — persist the full investigation report; returns `report_id`
+  - `SubmitAiAnalystIocsTool` — persist extracted + enriched IOCs (bulk, uses `report_id`)
+  - `ListAiAnalystIocsByCustomerTool` — query IOCs across a customer, filterable by `vt_verdict`
+  - `GetAlertAiAnalysisTool` — fetch complete analysis bundle (job + report + IOCs) for an alert
 - `WebSearch`, `WebFetch` — VirusTotal, Shodan, AbuseIPDB, MITRE ATT&CK, threat intel lookups
 - `Bash` — data processing, scripting (sandboxed in this container)
 - `mcp__nanoclaw__schedule_task` — schedule recurring sweeps and monitoring tasks
