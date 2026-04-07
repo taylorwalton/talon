@@ -1,0 +1,122 @@
+# Anonymizing MCP Proxy — Field Definitions
+#
+# This file controls which OpenSearch fields are anonymized before their values
+# reach the cloud model context window. Add new fields here and git pull to
+# distribute updates to all deployments.
+#
+# Token format: <PREFIX>_<N>
+# Example: a user field containing "john.doe" becomes "USER_1" the first time
+# it's seen, and stays "USER_1" for the rest of the session.
+#
+# Field names use underscore notation (Wazuh/CoPilot convention):
+#   data_win_eventdata_user  (not data.win.eventdata.user)
+#
+# To add a new field:
+#   1. Find the category that best fits (or add a new one)
+#   2. Add the field name in underscore notation
+#   3. Commit and push — users git pull to receive the update
+
+categories:
+
+  # ── User / Account identifiers ────────────────────────────────────────────
+  user:
+    token_prefix: "USER"
+    description: "Windows and Linux user account names"
+    fields:
+      - data_win_eventdata_user
+      - data_win_eventdata_targetUserName
+      - data_win_eventdata_subjectUserName
+      - data_win_eventdata_subjectusername
+      - data_win_eventdata_targetusername
+      - data_win_eventdata_callerProcessName
+      - data_win_eventdata_targetLogonId
+      - data_win_system_user
+      - syscheck_uname_after
+      - syscheck_uname_before
+      - data_srcuser
+      - data_dstuser
+
+  # ── Hostnames / Computer names ────────────────────────────────────────────
+  hostname:
+    token_prefix: "HOST"
+    description: "Internal hostnames and computer names"
+    fields:
+      - agent_name
+      - data_win_eventdata_workstationName
+      - data_win_eventdata_computerName
+      - data_win_system_computer
+      - predecoder_hostname
+      - manager_name
+      - data_win_eventdata_targetServerName
+
+  # ── Email addresses ───────────────────────────────────────────────────────
+  email:
+    token_prefix: "EMAIL"
+    description: "Email addresses (UPN-format usernames and explicit email fields)"
+    fields:
+      - data_win_eventdata_targetUserName  # often user@domain.com in Azure AD envs
+      - data_office365_UserId
+      - data_office365_Actor_ID
+      - data_gcp_protoPayload_authenticationInfo_principalEmail
+
+  # ── Internal / RFC1918 IP addresses ──────────────────────────────────────
+  # Note: external IPs are preserved — they're needed for VirusTotal / Shodan
+  # Internal IP detection is pattern-based (RFC1918 + loopback + link-local).
+  # No field list needed — the proxy detects them by value.
+  # Token prefix for internal IPs:
+internal_ip_token_prefix: "IP_INT"
+
+# ── Pattern-based anonymization ───────────────────────────────────────────
+# When enabled, text values are scanned for embedded PII patterns
+# even when they appear inside larger strings (e.g. paths, command lines).
+
+# Replace usernames embedded in Windows paths:
+#   C:\Users\john.doe\AppData  →  C:\Users\USER_1\AppData
+scan_user_paths: true
+
+# Replace RFC1918 IPs appearing inline in any string value
+scan_inline_ips: true
+
+# ── Fields to preserve (never anonymize) ─────────────────────────────────
+# Security-critical values that must reach the cloud model intact for
+# threat intel, hash lookups, MITRE correlation, etc.
+preserve_fields:
+  # Hashes — needed for VirusTotal / MalwareBazaar lookups
+  - data_win_eventdata_hashes
+  - data_win_eventdata_sha256
+  - data_win_eventdata_sha1
+  - data_win_eventdata_md5
+
+  # Rule metadata — classification, MITRE mapping, severity
+  - rule_id
+  - rule_description
+  - rule_level
+  - rule_groups
+  - rule_mitre_id
+  - rule_mitre_tactic
+  - rule_mitre_technique
+
+  # Windows Event IDs — alert type detection
+  - data_win_system_eventID
+  - data_win_system_eventid
+
+  # Process image paths — needed to identify malicious executables
+  - data_win_eventdata_image
+  - data_win_eventdata_parentImage
+  - data_win_eventdata_commandLine
+
+  # Network — destination (external) IPs and domains for threat intel
+  - data_win_eventdata_destinationIp
+  - data_win_eventdata_destinationHostname
+  - data_win_eventdata_destinationPort
+  - data_win_eventdata_queryName
+  - data_win_eventdata_queryResults
+  - data_srcip
+  - data_dstip
+  - data_dstport
+
+  # Timestamps and index pointers
+  - "@timestamp"
+  - timestamp
+  - _id
+  - _index

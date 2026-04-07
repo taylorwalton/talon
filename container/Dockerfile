@@ -28,9 +28,9 @@ RUN apt-get update && apt-get install -y \
     python3-venv \
     && rm -rf /var/lib/apt/lists/*
 
-# Install opensearch-mcp-server into a system venv (used by the SIEM MCP wrapper)
+# Install opensearch-mcp-server into a system venv (used by the SIEM MCP wrapper and anon proxy)
 RUN python3 -m venv /opt/opensearch-mcp \
-    && /opt/opensearch-mcp/bin/pip install --quiet opensearch-mcp-server
+    && /opt/opensearch-mcp/bin/pip install --quiet opensearch-mcp-server pyyaml
 
 # Install copilot-mcp-server into a system venv (used by the CoPilot MCP wrapper)
 RUN python3 -m venv /opt/copilot-mcp \

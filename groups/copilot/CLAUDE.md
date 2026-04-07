@@ -20,6 +20,27 @@ You do not just retrieve data — you **analyze** it, **correlate** it, and **ex
 
 ---
 
+## Privacy-Aware SIEM Queries
+
+**Use `mcp__opensearch_anon__*` tools instead of `mcp__opensearch__*` for all raw document and search queries.**
+
+The `opensearch_anon` server is an anonymizing proxy that wraps the standard OpenSearch MCP server. It intercepts tool results and replaces sensitive field values with consistent session tokens before they reach the cloud model context window:
+
+| Token format | What it replaces |
+|---|---|
+| `USER_1`, `USER_2`, … | Usernames, account names, UPNs |
+| `HOST_1`, `HOST_2`, … | Hostnames, computer names |
+| `EMAIL_1`, … | Email addresses |
+| `IP_INT_1`, … | Internal / RFC1918 IP addresses |
+
+External IPs, file hashes, domains, process paths, and rule metadata are **preserved** — they are needed intact for threat intelligence lookups.
+
+**De-anonymizing for the final report:** after analysis, call `mcp__opensearch_anon__deanonymize(text=<your draft>)` with the full report text. The proxy substitutes all tokens back to their original values. Always de-anonymize before writing the report to the analyst or calling `SubmitAiAnalystReportTool`.
+
+Token definitions live in `siem/anon_proxy/fields.yaml` and are updated via git pull.
+
+---
+
 ## Privacy-Aware Local Analysis
 
 Sensitive data retrieved from MCP tools (raw SIEM events, alert details, customer records) should be analyzed locally using Ollama wherever possible. The cloud model (Claude) acts as the **orchestrator** — deciding what to fetch and what to do next. Ollama acts as the **local analyst** — interpreting the raw sensitive content.
@@ -112,8 +133,8 @@ LIMIT 20;
 
 Run these in parallel:
 
-1. **`get_document`** — retrieves the full original event. This contains the raw log fields that MySQL does not store — process names, command lines, network destinations, file hashes, user accounts, MITRE tactic mappings, rule details, etc.
-2. **`get_index`** — retrieves the field mappings for `index_name`. This tells you the exact field names present in this index and their types (`keyword` vs `text` vs `long`, etc.).
+1. **`mcp__opensearch_anon__get_document`** — retrieves the full original event, with PII fields already anonymized (usernames → USER_N, internal IPs → IP_INT_N, hostnames → HOST_N). Security-relevant fields (hashes, external IPs, domains, process paths, rule metadata) are preserved intact.
+2. **`mcp__opensearch__get_index`** — retrieves the field mappings for `index_name`. Field names are not PII so the raw server is fine here.
 3. **`ollama_list_models`** — identify the best available local model for analysis.
 
 **Why the mapping matters:** field types determine which DSL query to use:
@@ -206,13 +227,21 @@ After enriching the IOC, look for additional context in the SIEM:
 - **Other affected hosts**: Did any other agents in the same customer environment trigger the same rule or contact the same IP/domain?
 - **Historical baseline**: Is this behavior new for this agent, or has it been seen before?
 
-Use targeted OpenSearch queries for each correlation check. Refer to `siem/CLAUDE.md` for field names and DSL patterns.
+Use `mcp__opensearch_anon__search_documents` for all correlation queries — results will be anonymized consistently with the tokens already assigned in Step 2. Refer to `siem/CLAUDE.md` for field names and DSL patterns.
 
 ### Step 6 — Write back to CoPilot and deliver the report
 
 Run the write-back and the analyst message in parallel once analysis is complete.
 
-#### 6a — Persist to CoPilot via MCP tools (always do this)
+#### 6a — De-anonymize the report draft
+
+Before submitting to CoPilot or sending to the analyst, pass your full draft through:
+```
+mcp__opensearch_anon__deanonymize(text=<full report draft>)
+```
+This replaces all session tokens (USER_1, HOST_2, IP_INT_3, etc.) with their original values so the analyst sees accurate names and IPs. Use the de-anonymized text for all subsequent write-back and delivery steps.
+
+#### 6b — Persist to CoPilot via MCP tools (always do this)
 
 Call these tools in order:
 
@@ -247,7 +276,7 @@ Call these tools in order:
    `ioc_type` must be one of: `ip`, `domain`, `hash`, `process`, `url`, `user`, `command`
    `vt_verdict` must be one of: `malicious`, `suspicious`, `clean`, `unknown`
 
-#### 6b — Send the structured report to the analyst
+#### 6c — Send the structured report to the analyst
 
 Deliver the report via `send_message` with these sections:
 
@@ -281,7 +310,8 @@ Deliver the report via `send_message` with these sections:
 
 **Active tools:**
 - `mcp__mysql__*` — CoPilot database (read-only): alerts, cases, agents, customers, integrations
-- `mcp__opensearch__*` — SIEM: raw events, aggregations, threat hunting
+- `mcp__opensearch_anon__*` — **Preferred** anonymizing SIEM proxy: same tools as opensearch but PII is tokenized before reaching cloud context. Includes built-in `deanonymize` tool.
+- `mcp__opensearch__*` — Raw SIEM access (use only for non-sensitive queries like index listing, cluster health)
 - `ollama_list_models` — list locally installed Ollama models
 - `ollama_generate` — run inference against a local model (model, prompt, system?)
 - `ollama_pull_model` / `ollama_delete_model` / `ollama_show_model` / `ollama_list_running` — model management

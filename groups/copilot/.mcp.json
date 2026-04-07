@@ -3,6 +3,9 @@
     "opensearch": {
       "command": "/workspace/extra/siem/opensearch-mcp.sh"
     },
+    "opensearch_anon": {
+      "command": "/workspace/extra/siem/anon-opensearch-mcp.sh"
+    },
     "mysql": {
       "command": "/workspace/extra/mysql/mysql-mcp.sh"
     },
