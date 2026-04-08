@@ -144,6 +144,12 @@ export class HttpChannel implements Channel {
   }
 
   async connect(): Promise<void> {
+    if (!HTTP_API_KEY) {
+      throw new Error(
+        'HTTP_API_KEY is not set in .env — refusing to start HTTP channel without authentication.',
+      );
+    }
+
     // Self-register the copilot group so NanoClaw routes messages to it.
     // The siem/ directory is mounted at /workspace/extra/siem so the agent-runner
     // discovers it as an additional directory: CLAUDE.md is loaded automatically
@@ -208,15 +214,13 @@ export class HttpChannel implements Channel {
       }
 
       // API key auth — enforced on all endpoints except /health
-      if (HTTP_API_KEY) {
-        const provided =
-          req.headers['x-api-key'] ||
-          req.headers['authorization']?.replace(/^Bearer\s+/i, '');
-        if (provided !== HTTP_API_KEY) {
-          res.writeHead(401, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ error: 'Unauthorized' }));
-          return;
-        }
+      const provided =
+        req.headers['x-api-key'] ||
+        req.headers['authorization']?.replace(/^Bearer\s+/i, '');
+      if (provided !== HTTP_API_KEY) {
+        res.writeHead(401, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Unauthorized' }));
+        return;
       }
 
       if (req.method === 'GET' && req.url === '/status') {

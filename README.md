@@ -150,8 +150,8 @@ CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-...
 # WEBHOOK_URL=https://your-endpoint.example.com/talon-digest
 # WEBHOOK_SECRET=optional-bearer-token
 
-# Optional: require an API key on all HTTP channel requests (except /health)
-# HTTP_API_KEY=your-secret-key-here
+# Required: API key for all HTTP channel requests (except /health)
+HTTP_API_KEY=your-secret-key-here
 
 # Optional: restrict the credential proxy to loopback only (default: 0.0.0.0)
 # CREDENTIAL_PROXY_HOST=127.0.0.1
