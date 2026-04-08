@@ -174,6 +174,16 @@ export class HttpChannel implements Channel {
             containerPath: 'ollama',
             readonly: true,
           },
+          {
+            hostPath: path.join(process.cwd(), 'mempalace'),
+            containerPath: 'mempalace',
+            readonly: true,
+          },
+          {
+            hostPath: path.join(process.cwd(), 'mempalace-data'),
+            containerPath: 'mempalace-data',
+            readonly: false,
+          },
         ],
       },
     };

@@ -37,6 +37,12 @@ RUN python3 -m venv /opt/copilot-mcp \
     && /opt/copilot-mcp/bin/pip install --quiet \
        "git+https://github.com/socfortress/copilot-mcp-server.git"
 
+# Install mempalace + chromadb into a system venv (used by the MemPalace MCP wrapper)
+# chromadb is large — this layer is cached after the first build
+RUN python3 -m venv /opt/mempalace \
+    && /opt/mempalace/bin/pip install --quiet \
+       "chromadb>=0.5.0,<0.7" "pyyaml>=6.0" mempalace
+
 # Set Chromium path for agent-browser
 ENV AGENT_BROWSER_EXECUTABLE_PATH=/usr/bin/chromium
 ENV PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium

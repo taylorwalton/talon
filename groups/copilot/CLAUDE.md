@@ -123,6 +123,28 @@ Then update it to `running` once you start the investigation:
 mcp__copilot__UpdateAiAnalystJobTool(job_id=<id>, status="running")
 ```
 
+### Step 0.5 — Query MemPalace for prior context
+
+Before touching the SIEM, search the persistent memory store for anything already known about this alert's asset, customer, or related IOCs. Run these in parallel:
+
+```
+mcp__mempalace__mempalace_search(
+  query="<asset_name> <alert_name>",
+  wing="<customer_code>"
+)
+
+mcp__mempalace__mempalace_kg_query(entity="<asset_name>")
+```
+
+Use the results to inform your analysis:
+- **Known false positive** for this rule/asset combination → flag early, still complete investigation but note it
+- **Prior severity verdict** on the same asset → use as baseline for escalation decisions
+- **IOC previously seen** → note recurrence, higher urgency
+- **Known-good behaviour** (e.g. admin tools expected on this host) → reduces suspicion score
+- **Asset metadata** (owner, department, crown jewel status) → shapes recommended actions
+
+If MemPalace returns no results, proceed normally — the palace is simply empty for this customer yet.
+
 ### Step 1 — Pull the alert from MySQL
 
 Query `incident_management_alert` filtered by customer and status. Join `incident_management_asset` to get the OpenSearch pointers:
@@ -289,6 +311,43 @@ Call these tools in order:
    `ioc_type` must be one of: `ip`, `domain`, `hash`, `process`, `url`, `user`, `command`
    `vt_verdict` must be one of: `malicious`, `suspicious`, `clean`, `unknown`
 
+4. **Write findings to MemPalace** — builds institutional knowledge for future investigations:
+
+   ```
+   # Store the investigation summary as a searchable drawer
+   mcp__mempalace__mempalace_add_drawer(
+     content="Alert: <alert_name> | Asset: <asset_name> | Severity: <verdict> | Summary: <1-2 sentences> | IOCs: <list>",
+     wing="<customer_code>",
+     room="alerts"
+   )
+
+   # Record asset facts in the knowledge graph
+   mcp__mempalace__mempalace_kg_add(
+     subject="<asset_name>",
+     predicate="had_alert",
+     object="<alert_name> (<severity>)",
+     valid_from="<timestamp>"
+   )
+   ```
+
+   For **confirmed false positives**, also record:
+   ```
+   mcp__mempalace__mempalace_add_drawer(
+     content="FALSE POSITIVE: Rule <rule_id> on <asset_name> — <reason>. First seen <date>.",
+     wing="<customer_code>",
+     room="false_positives"
+   )
+   ```
+
+   For **malicious or suspicious IOCs**, record them so future investigations can detect recurrence:
+   ```
+   mcp__mempalace__mempalace_add_drawer(
+     content="IOC: <value> | Type: <type> | VT: <verdict> | Seen on: <asset_name> | Alert: <alert_name> | Date: <timestamp>",
+     wing="<customer_code>",
+     room="threat_intel"
+   )
+   ```
+
 #### 6c — Send the structured report to the analyst
 
 Deliver the report via `send_message` with these sections:
@@ -328,6 +387,21 @@ Deliver the report via `send_message` with these sections:
 - `mcp__ollama__ollama_list_models` — list locally installed models (**call first** to check availability; skip all Ollama steps if this fails)
 - `mcp__ollama__ollama_generate` — run inference against a local model (model, prompt, system?)
 - `mcp__ollama__ollama_pull_model` / `ollama_delete_model` / `ollama_show_model` / `ollama_list_running` — model management
+- `mcp__mempalace__mempalace_search` — semantic search across past investigations (filter by `wing`=customer_code, `room`=category)
+- `mcp__mempalace__mempalace_kg_query` — knowledge graph lookup for an entity (asset, IOC, customer)
+- `mcp__mempalace__mempalace_kg_add` — record a new fact (subject → predicate → object, with timestamp)
+- `mcp__mempalace__mempalace_add_drawer` — store a text record in wing/room (investigations, false positives, threat intel)
+- `mcp__mempalace__mempalace_list_wings` / `mempalace_list_rooms` / `mempalace_status` — navigate the palace structure
+
+**MemPalace room taxonomy** (use consistently so searches are precise):
+
+| Wing | Room | What goes here |
+|---|---|---|
+| `<customer_code>` | `alerts` | Past investigation summaries and verdicts |
+| `<customer_code>` | `false_positives` | Confirmed FP patterns (rule + asset + reason) |
+| `<customer_code>` | `threat_intel` | Malicious/suspicious IOCs seen in this environment |
+| `<customer_code>` | `assets` | Asset metadata: owner, department, crown jewel status |
+| `<customer_code>` | `environment` | Known-good patterns, admin subnets, business hours |
 - `mcp__copilot__*` — CoPilot REST API (never write MySQL directly — always use these):
   - `GetCustomersTool` — list all customers
   - `CreateAiAnalystJobTool` — register a new investigation job at the start of each investigation

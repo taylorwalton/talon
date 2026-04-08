@@ -1,0 +1,5 @@
+# Palace data — gitignored entirely. This directory is created at runtime
+# and contains ChromaDB vectors and SQLite knowledge graph. Back it up
+# separately; do not commit it to the repository.
+*
+!.gitignore

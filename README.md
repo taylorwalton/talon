@@ -263,13 +263,25 @@ cp ollama/.env.example ollama/.env
 
 ---
 
-### 9. Build the container
+### 9. Set up MemPalace persistent memory
+
+MemPalace gives the SOC agent long-term memory — past investigation outcomes, asset metadata, confirmed false positives, and IOC history are stored in a local ChromaDB + SQLite knowledge graph and retrieved automatically at the start of each investigation.
+
+```bash
+bash mempalace/setup.sh
+```
+
+This creates the local venv and the `mempalace-data/` directory where the palace is stored. No further configuration is required — the palace initialises on first use.
+
+> **Note:** `mempalace-data/` is gitignored and persists across container restarts. Back it up alongside your other `.env` files.
+
+### 10. Build the container
 
 ```bash
 CONTAINER_RUNTIME=docker ./container/build.sh
 ```
 
-### 10. Start the service
+### 11. Start the service
 
 **macOS:**
 ```bash
@@ -335,7 +347,7 @@ systemctl --user enable --now talon
 loginctl enable-linger
 ```
 
-### 11. Verify
+### 12. Verify
 
 ```bash
 curl http://localhost:3100/health
@@ -366,6 +378,7 @@ curl -s -N -X POST http://localhost:3100/message \
 | `mysql/.env` | CoPilot MySQL credentials — gitignored |
 | `copilot-mcp/.env` | CoPilot REST API credentials — gitignored |
 | `ollama/.env` | Optional Ollama host override — gitignored, omit if using defaults |
+| `mempalace-data/` | MemPalace palace data (ChromaDB + SQLite) — gitignored, back up separately |
 | `.env` | `CLAUDE_CODE_OAUTH_TOKEN`, `WEBHOOK_URL`, `WEBHOOK_SECRET` — gitignored |
 | `groups/copilot/CLAUDE.md` | SOC agent identity, known assets, ongoing investigations |
 | `groups/copilot/prompts/` | Per-alert-type investigation templates (e.g. `sysmon_event_1.txt`) |

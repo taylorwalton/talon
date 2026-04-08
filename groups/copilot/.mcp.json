@@ -14,6 +14,9 @@
     },
     "ollama": {
       "command": "/workspace/extra/ollama/ollama-mcp.sh"
+    },
+    "mempalace": {
+      "command": "/workspace/extra/mempalace/mempalace-mcp.sh"
     }
   }
 }
