@@ -488,13 +488,21 @@ When an analyst asks you to add or modify a monitoring task:
 
 ## Memory
 
-Update this CLAUDE.md when you learn something persistent about the environment:
-- Confirmed customer codes and their names
-- Known-good IP ranges or internal subnets (reduces false positive noise)
-- Confirmed false positive signatures (rule IDs + context)
-- Critical or crown jewel assets (hostnames, agent IDs)
-- Ongoing investigation IDs and their current status
-- Client-specific business hours (affects off-hours anomaly scoring)
+All persistent knowledge is stored in **MemPalace** — do not update this CLAUDE.md with investigation findings. Use the MCP tools below instead so knowledge is searchable, timestamped, and survives across sessions.
+
+| What to remember | Tool | Wing | Room |
+|---|---|---|---|
+| Customer codes and names | `mempalace_kg_add` | `<customer_code>` | — |
+| Known-good IP ranges / subnets | `mempalace_add_drawer` | `<customer_code>` | `environment` |
+| Confirmed false positive signatures | `mempalace_add_drawer` | `<customer_code>` | `false_positives` |
+| Crown jewel / critical assets | `mempalace_add_drawer` | `<customer_code>` | `assets` |
+| Client business hours | `mempalace_add_drawer` | `<customer_code>` | `environment` |
+| Past investigation summaries | `mempalace_add_drawer` | `<customer_code>` | `alerts` |
+| Malicious / suspicious IOCs | `mempalace_add_drawer` | `<customer_code>` | `threat_intel` |
+
+**At the start of every investigation**, query MemPalace before touching the SIEM (Step 0.5 in the workflow above). Knowledge written during one investigation is automatically available in all future ones.
+
+Only update this CLAUDE.md for structural changes to the investigation workflow itself — not for customer-specific data.
 
 ---
-*Deployed by SOCfortress. Each client instance has its own credentials in `siem/.env` and `mysql/.env`. Append client-specific context (asset inventory, known-good ranges, crown jewels) below this line.*
+*Deployed by SOCfortress. Each client instance has its own credentials in `siem/.env` and `mysql/.env`.*
