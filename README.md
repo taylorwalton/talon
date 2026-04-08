@@ -186,9 +186,11 @@ EOF
 ### 5. Configure SIEM credentials
 
 ```bash
-cp siem/.env.example siem/.env
+bash siem/setup.sh
 # Edit siem/.env — set OPENSEARCH_HOSTS, OPENSEARCH_USERNAME, OPENSEARCH_PASSWORD
 ```
+
+The setup script creates the Python venv and installs `opensearch-mcp-server` into it. The `.env` file is created from the template automatically if it doesn't already exist.
 
 ### 6. Configure MySQL credentials
 
