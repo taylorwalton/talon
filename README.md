@@ -252,21 +252,20 @@ cp ollama/.env.example ollama/.env
 
 [RunPod](https://www.runpod.io) lets you run open-source models on cloud GPUs and pay only for what you use. Because Talon's anonymizing proxy has already replaced PII with tokens before the LLM call, what RunPod sees is desensitised data — not real usernames, hostnames, or internal IPs.
 
-**Recommended: RunPod Serverless** — scales to zero between investigations, so you pay only during active analysis (typically seconds per alert).
+**Recommended: RunPod Pod** — persistent GPU instance with no cold start. Stop the pod when not in use (you only pay for storage at ~$0.20/month while stopped).
 
 1. Create a RunPod account at [runpod.io](https://www.runpod.io)
-2. Deploy an Ollama serverless worker using RunPod's template library, or spin up a persistent pod:
-   - In the pod config, expose port `11434` via HTTP proxy
+2. Deploy a pod using the **Ollama NVIDIA CUDA** template
+   - GPU: `RTX 3090` or `RTX 4090` recommended
+   - Expose port `11434` via HTTP proxy
    - Your endpoint will be: `https://<pod-id>-11434.proxy.runpod.net`
-3. Pull your chosen model inside the pod:
+3. SSH into the pod and pull your chosen model:
    ```bash
    ollama pull qwen2.5:7b
    ```
-4. Point Talon at the RunPod endpoint:
+4. Point Talon at the RunPod endpoint — note this goes in `ollama/.env`, **not** the root `.env`:
    ```bash
-   cp ollama/.env.example ollama/.env
-   # Edit ollama/.env:
-   OLLAMA_HOST=https://<pod-id>-11434.proxy.runpod.net
+   echo 'OLLAMA_HOST=https://<pod-id>-11434.proxy.runpod.net' > ollama/.env
    ```
 
 **Best for:** clients without GPU hardware who still want open-source model analysis.
