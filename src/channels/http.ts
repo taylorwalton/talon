@@ -11,6 +11,7 @@ import { Channel, RegisteredGroup } from '../types.js';
 const COPILOT_JID = process.env.COPILOT_JID || 'http:copilot';
 const COPILOT_GROUP_FOLDER = process.env.COPILOT_GROUP_FOLDER || 'copilot';
 const COPILOT_HTTP_PORT = parseInt(process.env.COPILOT_HTTP_PORT || '3100', 10);
+const HTTP_API_KEY = process.env.HTTP_API_KEY || '';
 
 interface SseWriter {
   res: http.ServerResponse;
@@ -203,6 +204,18 @@ export class HttpChannel implements Channel {
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ status: 'ok', channel: 'http' }));
         return;
+      }
+
+      // API key auth — enforced on all endpoints except /health
+      if (HTTP_API_KEY) {
+        const provided =
+          req.headers['x-api-key'] ||
+          req.headers['authorization']?.replace(/^Bearer\s+/i, '');
+        if (provided !== HTTP_API_KEY) {
+          res.writeHead(401, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Unauthorized' }));
+          return;
+        }
       }
 
       if (req.method === 'GET' && req.url === '/status') {
