@@ -4,6 +4,7 @@ import path from 'path';
 import { createTask, getTaskById, getTasksForGroup } from '../db.js';
 import { logger } from '../logger.js';
 import { computeNextRun } from '../task-scheduler.js';
+import { readEnvFile } from '../env.js';
 import { registerChannel, ChannelOpts } from './registry.js';
 import { WEBHOOK_JID } from './webhook.js';
 import { Channel, RegisteredGroup } from '../types.js';
@@ -11,7 +12,7 @@ import { Channel, RegisteredGroup } from '../types.js';
 const COPILOT_JID = process.env.COPILOT_JID || 'http:copilot';
 const COPILOT_GROUP_FOLDER = process.env.COPILOT_GROUP_FOLDER || 'copilot';
 const COPILOT_HTTP_PORT = parseInt(process.env.COPILOT_HTTP_PORT || '3100', 10);
-const HTTP_API_KEY = process.env.HTTP_API_KEY || '';
+const HTTP_API_KEY = readEnvFile(['HTTP_API_KEY']).HTTP_API_KEY || '';
 
 interface SseWriter {
   res: http.ServerResponse;
