@@ -183,33 +183,53 @@ Some indices use dot notation (`rule.groups`), others use underscores (`rule_gro
 
 ### Step 2.5 — Select the alert-type investigation template
 
-After fetching the raw OpenSearch event, detect the alert type and load its investigation template before extracting IOCs. The template provides targeted analysis steps for that specific alert category.
+After fetching the raw OpenSearch event, discover available templates and use Ollama to pick the best match. This is fully dynamic — no hardcoded mappings, new templates are picked up automatically.
 
-**Detection — check in this order:**
+**Step 1 — Discover available templates**
 
-1. **From the raw OpenSearch document** — look at `rule.groups` (array). Find any entry matching the pattern `sysmon_event_<N>` (e.g., `sysmon_event_1`, `sysmon_event_3`, `sysmon_event_7`). Use that as the template key.
-2. **From the OpenSearch document** — if `rule.groups` has no sysmon match, check `data.win.system.eventID` and map it:
-   - `1` → `sysmon_event_1` (Process Creation)
-   - `3` → `sysmon_event_3` (Network Connection)
-   - `7` → `sysmon_event_7` (Image Load / DLL)
-   - `11` → `sysmon_event_11` (File Create)
-   - `22` → `sysmon_event_22` (DNS Query)
-3. **From the MySQL alert context** — if both OpenSearch checks fail, query `incident_management_alertcontext` for the alert's `context` JSON. In that JSON the fields use underscores: `rule_groups` and `data_win_system_eventID`.
+```bash
+ls /workspace/group/prompts/
+```
+
+If the directory is empty or doesn't exist, skip to Step 3.
+
+**Step 2 — Use Ollama to select the best match (if Ollama is available)**
+
+Pass the template filenames and a summary of the raw alert to Ollama:
+
+```
+mcp__ollama__ollama_generate(
+  model="<best available>",
+  prompt="Available investigation templates:\n<list of .txt filenames>\n\nAlert summary:\nRule: <rule.description>\nGroups: <rule.groups>\nEvent ID: <data.win.system.eventID>\nSource: <agent.name>\n\nWhich template filename best matches this alert? Reply with ONLY the filename (e.g. sysmon_event_1.txt) or NULL if none are a good match.",
+  system="You are a SOC triage assistant. Select the most relevant investigation template for this alert based on the alert type and rule metadata. Be conservative — return NULL if no template is a strong match."
+)
+```
+
+Use the filename Ollama returns. If Ollama is unavailable or returns NULL, fall back to Step 3 (filename pattern match).
+
+**Step 3 — Fallback: filename pattern match (if Ollama unavailable or returned NULL)**
+
+Try to match a template by inspecting the alert fields directly:
+- Check `rule.groups` for any value that matches an available filename (strip `.txt`)
+- Check `data.win.system.eventID` — try `sysmon_event_<id>.txt`
+- Check `rule.description` for keywords matching available filenames
+
+If no match is found, continue with the default Steps 3–6 below.
 
 **Loading the template:**
 
-Once you have the template key (e.g., `sysmon_event_1`), read:
+Once a template is selected, read it:
 ```
-/workspace/group/prompts/<key>.txt
+/workspace/group/prompts/<filename>
 ```
 
-If the file exists, follow the analysis steps defined in it. Fill in the template variables when presenting your findings:
+Follow the analysis steps defined in it. Fill in the template variables when presenting your findings:
 - `{{ alert }}` → the full raw OpenSearch event JSON
-- `{{ event_id }}` → the numeric Sysmon event ID (e.g., `1`)
+- `{{ event_id }}` → the numeric event ID
 - `{{ pipeline | default('wazuh') }}` → `wazuh`
 - `{{ virustotal_results }}` → your VirusTotal results after running threat intel (complete Steps 3–4 first, then substitute)
 
-If no template file exists for the detected type, continue with the default Steps 3–6 below.
+If no template matches, continue with the default Steps 3–6 below.
 
 ---
 
