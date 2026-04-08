@@ -48,12 +48,36 @@ _is_native_exec() {
 }
 
 if _is_native_exec "$LOCAL_PYTHON"; then
-    exec "$LOCAL_PYTHON" -m mempalace.mcp_server
+    PYTHON="$LOCAL_PYTHON"
 elif [[ -x "$SYSTEM_PYTHON" ]]; then
-    exec "$SYSTEM_PYTHON" -m mempalace.mcp_server
+    PYTHON="$SYSTEM_PYTHON"
 else
     echo "[mempalace-mcp] ERROR: python3 not found." >&2
     echo "[mempalace-mcp]   In a container: rebuild the image (container/build.sh)" >&2
     echo "[mempalace-mcp]   On the host: run mempalace/setup.sh" >&2
     exit 1
 fi
+
+# Auto-initialize the palace on first run.
+# Creates the ChromaDB collection and SQLite knowledge graph tables so the
+# MCP server can immediately read and write without a separate init step.
+SENTINEL="$PALACE_PATH/.initialized"
+if [[ ! -f "$SENTINEL" ]]; then
+    echo "[mempalace-mcp] Initializing palace at $PALACE_PATH..." >&2
+    "$PYTHON" - <<'PYEOF'
+import os, sys
+palace_path = os.environ.get("MEMPALACE_PALACE_PATH", "")
+try:
+    # Import and instantiate Palace — this creates the ChromaDB collection
+    # and SQLite tables if they don't already exist.
+    from mempalace.palace import Palace
+    Palace()
+    print(f"[mempalace-mcp] Palace initialized successfully", file=sys.stderr)
+except Exception as e:
+    # Non-fatal: the MCP server may still start and handle init errors itself
+    print(f"[mempalace-mcp] Warning: init returned: {e}", file=sys.stderr)
+PYEOF
+    touch "$SENTINEL"
+fi
+
+exec "$PYTHON" -m mempalace.mcp_server
