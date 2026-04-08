@@ -368,21 +368,28 @@ loginctl enable-linger
 ### 12. Verify
 
 ```bash
+# /health is unauthenticated
 curl http://localhost:3100/health
+
+# All other endpoints require the API key from your .env
+export TALON_API_KEY="your-secret-key-here"
 
 # Test SIEM connectivity
 curl -s -N -X POST http://localhost:3100/message \
   -H "Content-Type: application/json" \
+  -H "x-api-key: $TALON_API_KEY" \
   -d '{"message": "Check cluster health", "sender": "test"}'
 
 # Test CoPilot MCP connectivity
 curl -s -N -X POST http://localhost:3100/message \
   -H "Content-Type: application/json" \
+  -H "x-api-key: $TALON_API_KEY" \
   -d '{"message": "Use the copilot MCP tool to list all customers.", "sender": "test"}'
 
 # Test Ollama (optional — only if installed)
 curl -s -N -X POST http://localhost:3100/message \
   -H "Content-Type: application/json" \
+  -H "x-api-key: $TALON_API_KEY" \
   -d '{"message": "List available Ollama models.", "sender": "test"}'
 ```
 
