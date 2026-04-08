@@ -199,25 +199,64 @@ bash copilot-mcp/setup.sh
 > COPILOT_URL=http://host.docker.internal:5000
 > ```
 
-### 8. Configure Ollama (optional)
+### 8. Configure local LLM analysis (optional)
 
-If you want the agent to use a local LLM for privacy-aware event analysis:
+Talon can route raw SIEM event analysis through an open-source LLM instead of the Claude cloud model. Combined with the anonymizing proxy — which replaces PII with session tokens before any LLM call — this keeps sensitive data interpretation off Anthropic's API entirely.
+
+If no LLM is configured, the agent skips local analysis silently and continues the investigation without it.
+
+There are two ways to run the LLM:
+
+---
+
+#### Option A — Local Ollama (on-premises, best privacy)
+
+Install [Ollama](https://ollama.com) on the same machine as Talon and pull a model:
 
 ```bash
-# Install Ollama from https://ollama.com, then pull a model:
-ollama pull qwen2.5:7b    # recommended
-# or: ollama pull llama3.2:3b  (lighter)
+ollama pull qwen2.5:7b    # recommended — strong analytical capability
 # or: ollama pull mistral:7b
+# or: ollama pull llama3.2:3b  (lighter, faster)
 ```
 
-No `.env` is needed if Ollama is on the same machine — the agent container reaches it via `host.docker.internal:11434` automatically. To point at a remote Ollama server:
+No `.env` needed — the agent container reaches Ollama automatically via `host.docker.internal:11434`.
 
-```bash
-cp ollama/.env.example ollama/.env
-# Edit ollama/.env — set OLLAMA_HOST=http://<host>:11434
-```
+**Best for:** clients with an existing GPU server or workstation.
 
-If Ollama is not installed or not running, the agent skips local analysis silently and continues the investigation without it.
+---
+
+#### Option B — RunPod cloud GPU (no hardware required)
+
+[RunPod](https://www.runpod.io) lets you run open-source models on cloud GPUs and pay only for what you use. Because Talon's anonymizing proxy has already replaced PII with tokens before the LLM call, what RunPod sees is desensitised data — not real usernames, hostnames, or internal IPs.
+
+**Recommended: RunPod Serverless** — scales to zero between investigations, so you pay only during active analysis (typically seconds per alert).
+
+1. Create a RunPod account at [runpod.io](https://www.runpod.io)
+2. Deploy an Ollama serverless worker using RunPod's template library, or spin up a persistent pod:
+   - In the pod config, expose port `11434` via HTTP proxy
+   - Your endpoint will be: `https://<pod-id>-11434.proxy.runpod.net`
+3. Pull your chosen model inside the pod:
+   ```bash
+   ollama pull qwen2.5:7b
+   ```
+4. Point Talon at the RunPod endpoint:
+   ```bash
+   cp ollama/.env.example ollama/.env
+   # Edit ollama/.env:
+   OLLAMA_HOST=https://<pod-id>-11434.proxy.runpod.net
+   ```
+
+**Best for:** clients without GPU hardware who still want open-source model analysis.
+
+| | Local Ollama | RunPod Serverless | RunPod Persistent Pod |
+|---|---|---|---|
+| Hardware required | Yes (GPU) | No | No |
+| Running cost | $0 (sunk) | Pay per investigation | ~$0.20–0.44/hr |
+| Cold start | None | ~30–60s | None |
+| Privacy | Best (fully on-prem) | Good (PII already tokenized) | Good (PII already tokenized) |
+| Best for | Existing GPU infra | Most clients | High-volume SOCs |
+
+---
 
 ### 9. Build the container
 
