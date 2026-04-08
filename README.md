@@ -219,7 +219,12 @@ ollama pull qwen2.5:7b    # recommended — strong analytical capability
 # or: ollama pull llama3.2:3b  (lighter, faster)
 ```
 
-No `.env` needed — the agent container reaches Ollama automatically via `host.docker.internal:11434`.
+No `.env` is needed for same-machine installs — the agent container reaches Ollama automatically via `host.docker.internal:11434`. If Ollama is running on a **different host**, create the config file:
+
+```bash
+cp ollama/.env.example ollama/.env
+# Edit ollama/.env — set OLLAMA_HOST=http://<host>:11434
+```
 
 **Best for:** clients with an existing GPU server or workstation.
 
