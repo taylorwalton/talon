@@ -1,101 +1,73 @@
-# Contributing
+# Contributing to Talon
+
+Talon is a SOCfortress product. Contributions are welcome but reviewed with a security-first lens — this tool processes live SOC alert data and runs with access to customer SIEM environments.
 
 ## Before You Start
 
 1. **Check for existing work.** Search open PRs and issues before starting:
    ```bash
-   gh pr list --repo qwibitai/nanoclaw --search "<your feature>"
-   gh issue list --repo qwibitai/nanoclaw --search "<your feature>"
+   gh pr list --repo taylorwalton/talon --search "<your topic>"
+   gh issue list --repo taylorwalton/talon --search "<your topic>"
    ```
-   If a related PR or issue exists, build on it rather than duplicating effort.
 
-2. **Check alignment.** Read the [Philosophy section in README.md](README.md#philosophy). Source code changes should only be things 90%+ of users need. Skills can be more niche, but should still be useful beyond a single person's setup.
+2. **One thing per PR.** One bug fix, one capability, one improvement. Don't mix unrelated changes.
 
-3. **One thing per PR.** Each PR should do one thing — one bug fix, one skill, one simplification. Don't mix unrelated changes in a single PR.
+3. **No real customer data.** Never include actual alert data, credentials, hostnames, IPs, or customer names in issues, PRs, or example output.
 
-## Source Code Changes
+## What We Accept
 
-**Accepted:** Bug fixes, security fixes, simplifications, reducing code.
+### Source code changes
 
-**Not accepted:** Features, capabilities, compatibility, enhancements. These should be skills.
+**Accepted:**
+- Bug fixes and security fixes
+- Improvements to the anonymising proxy (`siem/anon_proxy/`) — new field types, tokenisation rules, edge cases
+- MemPalace integration improvements — room taxonomy, init reliability, MCP tool coverage
+- Investigation workflow improvements in `groups/copilot/CLAUDE.md`
+- Container build reliability fixes
+- Documentation fixes
 
-## Skills
+**Not accepted:**
+- Broad feature additions that change core NanoClaw behaviour — these belong in skills
+- Changes that weaken the anonymising proxy or expose PII to the cloud model
+- Anything that bypasses the mount allowlist security layer
 
-NanoClaw uses [Claude Code skills](https://code.claude.com/docs/en/skills) — markdown files with optional supporting files that teach Claude how to do something. There are four types of skills in NanoClaw, each serving a different purpose.
+### Skills
 
-### Why skills?
+Talon inherits the NanoClaw skill system. Skills are markdown files (with optional supporting code) that teach Claude how to do something new.
 
-Every user should have clean and minimal code that does exactly what they need. Skills let users selectively add features to their fork without inheriting code for features they don't want.
+#### Container skills (most common for SOC work)
 
-### Skill types
-
-#### 1. Feature skills (branch-based)
-
-Add capabilities to NanoClaw by merging a git branch. The SKILL.md contains setup instructions; the actual code lives on a `skill/*` branch.
-
-**Location:** `.claude/skills/` on `main` (instructions only), code on `skill/*` branch
-
-**Examples:** `/add-telegram`, `/add-slack`, `/add-discord`, `/add-gmail`
-
-**How they work:**
-1. User runs `/add-telegram`
-2. Claude follows the SKILL.md: fetches and merges the `skill/telegram` branch
-3. Claude walks through interactive setup (env vars, bot creation, etc.)
-
-**Contributing a feature skill:**
-1. Fork `qwibitai/nanoclaw` and branch from `main`
-2. Make the code changes (new files, modified source, updated `package.json`, etc.)
-3. Add a SKILL.md in `.claude/skills/<name>/` with setup instructions — step 1 should be merging the branch
-4. Open a PR. We'll create the `skill/<name>` branch from your work
-
-See `/add-telegram` for a good example. See [docs/skills-as-branches.md](docs/skills-as-branches.md) for the full system design.
-
-#### 2. Utility skills (with code files)
-
-Standalone tools that ship code files alongside the SKILL.md. The SKILL.md tells Claude how to install the tool; the code lives in the skill directory itself (e.g. in a `scripts/` subfolder).
-
-**Location:** `.claude/skills/<name>/` with supporting files
-
-**Examples:** `/claw` (Python CLI in `scripts/claw`)
-
-**Key difference from feature skills:** No branch merge needed. The code is self-contained in the skill directory and gets copied into place during installation.
-
-**Guidelines:**
-- Put code in separate files, not inline in the SKILL.md
-- Use `${CLAUDE_SKILL_DIR}` to reference files in the skill directory
-- SKILL.md contains installation instructions, usage docs, and troubleshooting
-
-#### 3. Operational skills (instruction-only)
-
-Workflows and guides with no code changes. The SKILL.md is the entire skill — Claude follows the instructions to perform a task.
-
-**Location:** `.claude/skills/` on `main`
-
-**Examples:** `/setup`, `/debug`, `/customize`, `/update-nanoclaw`, `/update-skills`
-
-**Guidelines:**
-- Pure instructions — no code files, no branch merges
-- Use `AskUserQuestion` for interactive prompts
-- These stay on `main` and are always available to every user
-
-#### 4. Container skills (agent runtime)
-
-Skills that run inside the agent container, not on the host. These teach the container agent how to use tools, format output, or perform tasks. They are synced into each group's `.claude/skills/` directory when a container starts.
+These run inside the agent container and extend what the SOC agent can do during an investigation.
 
 **Location:** `container/skills/<name>/`
 
-**Examples:** `agent-browser` (web browsing), `capabilities` (/capabilities command), `status` (/status command), `slack-formatting` (Slack mrkdwn syntax)
-
-**Key difference:** These are NOT invoked by the user on the host. They're loaded by Claude Code inside the container and influence how the agent behaves.
+**Examples:** new investigation templates, IOC enrichment workflows, reporting formats
 
 **Guidelines:**
-- Follow the same SKILL.md + frontmatter format
+- Follow the SKILL.md frontmatter format (see below)
 - Use `allowed-tools` frontmatter to scope tool permissions
-- Keep them focused — the agent's context window is shared across all container skills
+- Keep them focused — the agent shares its context window across all container skills
+- Do not hardcode customer-specific values — use env vars or CLAUDE.md annotations
+
+#### Operational skills (host-side workflows)
+
+Instruction-only workflows that run on the host via Claude Code.
+
+**Location:** `.claude/skills/<name>/`
+
+**Examples:** `/setup`, `/debug`, onboarding a new CoPilot customer
+
+#### Feature skills (branch-based)
+
+Larger capabilities that require source code changes. Code lives on a `skill/*` branch; the SKILL.md on `main` contains setup instructions.
+
+**Contributing a feature skill:**
+1. Fork and branch from `main`
+2. Make the code changes
+3. Add a SKILL.md in `.claude/skills/<name>/` — step 1 of the instructions should be merging the branch
+4. Open a PR
 
 ### SKILL.md format
-
-All skills use the [Claude Code skills standard](https://code.claude.com/docs/en/skills):
 
 ```markdown
 ---
@@ -106,42 +78,54 @@ description: What this skill does and when to use it.
 Instructions here...
 ```
 
-**Rules:**
-- Keep SKILL.md **under 500 lines** — move detail to separate reference files
 - `name`: lowercase, alphanumeric + hyphens, max 64 chars
-- `description`: required — Claude uses this to decide when to invoke the skill
+- `description`: required — used by Claude to decide when to invoke the skill
+- Keep SKILL.md under 500 lines — move detail to separate reference files
 - Put code in separate files, not inline in the markdown
-- See the [skills standard](https://code.claude.com/docs/en/skills) for all available frontmatter fields
+
+## Security Considerations
+
+Because Talon handles live security data, contributions touching these areas get extra scrutiny:
+
+| Area | Concern |
+|---|---|
+| `siem/anon_proxy/` | Must not leak PII fields to the cloud model |
+| `siem/anon_proxy/fields.yaml` | New fields must be correctly categorised (token vs preserve) |
+| `mempalace/` | Palace data must never be committed to the repo |
+| `mount-allowlist.json` | Changes that widen write access need justification |
+| MCP server wrappers | Must follow the `_is_native_exec` pattern for container compatibility |
+| `.mcp.json` | New servers must be vetted — they run with container-level access |
 
 ## Testing
 
-Test your contribution on a fresh clone before submitting. For skills, run the skill end-to-end and verify it works.
+Test on a real (or realistic) CoPilot environment before submitting. For MCP changes, verify the server starts cleanly inside the container:
+
+```bash
+echo '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}' | \
+  docker run --rm -i --entrypoint bash nanoclaw-agent \
+  /workspace/extra/<your-tool>/<your-tool>-mcp.sh 2>/dev/null
+```
+
+For anonymising proxy changes, confirm tokens round-trip correctly through `deanonymize`.
 
 ## Pull Requests
 
-### Before opening
-
-1. **Link related issues.** If your PR resolves an open issue, include `Closes #123` in the description so it's auto-closed on merge.
-2. **Test thoroughly.** Run the feature yourself. For skills, test on a fresh clone.
-3. **Check the right box** in the PR template. Labels are auto-applied based on your selection:
-
-| Checkbox | Label |
-|----------|-------|
-| Feature skill | `PR: Skill` + `PR: Feature` |
-| Utility skill | `PR: Skill` |
-| Operational/container skill | `PR: Skill` |
-| Fix | `PR: Fix` |
-| Simplification | `PR: Refactor` |
-| Documentation | `PR: Docs` |
-
-### PR description
-
-Keep it concise. Remove any template sections that don't apply. The description should cover:
+### Description format
 
 - **What** — what the PR adds or changes
 - **Why** — the motivation
 - **How it works** — brief explanation of the approach
-- **How it was tested** — what you did to verify it works
-- **Usage** — how the user invokes it (for skills)
+- **How it was tested** — what you ran to verify it
+- **Security impact** — does this touch PII handling, mounts, or MCP servers?
 
-Don't pad the description. A few clear sentences are better than lengthy paragraphs.
+Keep it concise. A few clear sentences beat lengthy paragraphs.
+
+### Before opening
+
+- `Closes #123` in the description if it resolves an open issue
+- No real customer data anywhere in the diff, test output, or description
+- Run `npm run build` and confirm the container builds cleanly
+
+---
+
+*Talon is developed and maintained by [SOCfortress](https://www.socfortress.co).*
