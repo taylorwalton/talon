@@ -1,6 +1,6 @@
 <h1 align="center">
 
-<a href="https://www.socfortress.co"><img src="assets/talon-logo.jpg" alt="Talon" width="400"></a>
+<a href="https://www.socfortress.co"><img src="assets/talon-final-1024.jpg" alt="Talon" width="400"></a>
 
 Talon
 
