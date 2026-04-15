@@ -447,6 +447,25 @@ Deliver the report via `send_message` with these sections:
   - `SubmitAiAnalystIocsTool` — persist extracted + enriched IOCs (bulk, uses `report_id`)
   - `ListAiAnalystIocsByCustomerTool` — query IOCs across a customer, filterable by `vt_verdict`
   - `GetAlertAiAnalysisTool` — fetch complete analysis bundle (job + report + IOCs) for an alert
+- `mcp__wazuh__*` — Wazuh manager API (use for agent inventory, SCA posture checks, and rule lookups to enrich investigations):
+  - `AuthenticateTool` — test connectivity and refresh JWT
+  - `GetAgentsTool` — list agents with status filtering (active, disconnected, never_connected)
+  - `GetAgentPortsTool` — network connections open on an agent (syscollector)
+  - `GetAgentPackagesTool` — installed software inventory for an agent
+  - `GetAgentProcessesTool` — running processes on an agent at collection time
+  - `GetAgentSCATool` — Security Configuration Assessment results (pass/fail/not_applicable per policy)
+  - `ListRulesTool` — search rules by level, group, filename, MITRE ID, or description
+  - `GetRuleFilesTool` — list all rule files and their enabled/disabled status
+  - `GetRuleFileContentTool` — fetch raw XML content of a rule file
+- `mcp__velociraptor__*` — Velociraptor DFIR platform (use for live response, deep host forensics, and artifact collection when an investigation warrants it):
+  - `AuthenticateTool` — test connectivity to the Velociraptor server
+  - `GetAgentInfo` — look up a client by hostname, returns client ID and metadata
+  - `RunVQLQueryTool` — execute arbitrary VQL against the server or a specific client
+  - `ListWindowsArtifactsTool` / `ListLinuxArtifactsTool` — list available artifacts with descriptions
+  - `ListWindowsArtifactNamesTool` / `ListLinuxArtifactNamesTool` — artifact names only (faster lookup)
+  - `CollectArtifactDetailsTool` / `FindArtifactDetailsTool` — get artifact spec and parameters before collecting
+  - `CollectArtifactTool` — initiate an artifact collection on a client (returns flow ID)
+  - `GetCollectionResultsTool` — retrieve results for a completed collection (includes retry logic)
 - `WebSearch`, `WebFetch` — VirusTotal, Shodan, AbuseIPDB, MITRE ATT&CK, threat intel lookups
 - `Bash` — data processing, scripting (sandboxed in this container)
 - `mcp__nanoclaw__schedule_task` — schedule recurring sweeps and monitoring tasks
