@@ -184,6 +184,16 @@ export class HttpChannel implements Channel {
             readonly: true,
           },
           {
+            hostPath: path.join(process.cwd(), 'wazuh-mcp'),
+            containerPath: 'wazuh-mcp',
+            readonly: true,
+          },
+          {
+            hostPath: path.join(process.cwd(), 'velociraptor-mcp'),
+            containerPath: 'velociraptor-mcp',
+            readonly: true,
+          },
+          {
             hostPath: path.join(process.cwd(), 'ollama'),
             containerPath: 'ollama',
             readonly: true,

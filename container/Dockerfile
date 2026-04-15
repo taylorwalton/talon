@@ -37,6 +37,16 @@ RUN python3 -m venv /opt/copilot-mcp \
     && /opt/copilot-mcp/bin/pip install --quiet \
        "git+https://github.com/socfortress/copilot-mcp-server.git"
 
+# Install wazuh-mcp-server into a system venv (used by the Wazuh MCP wrapper)
+RUN python3 -m venv /opt/wazuh-mcp \
+    && /opt/wazuh-mcp/bin/pip install --quiet \
+       "git+https://github.com/socfortress/wazuh-mcp-server.git"
+
+# Install velociraptor-mcp-server into a system venv (used by the Velociraptor MCP wrapper)
+RUN python3 -m venv /opt/velociraptor-mcp \
+    && /opt/velociraptor-mcp/bin/pip install --quiet \
+       "git+https://github.com/socfortress/velociraptor-mcp-server.git"
+
 # Install mempalace + chromadb into a system venv (used by the MemPalace MCP wrapper)
 # chromadb is large — this layer is cached after the first build
 RUN python3 -m venv /opt/mempalace \

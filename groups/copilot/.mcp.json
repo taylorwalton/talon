@@ -12,6 +12,12 @@
     "copilot": {
       "command": "/workspace/extra/copilot-mcp/copilot-mcp.sh"
     },
+    "wazuh": {
+      "command": "/workspace/extra/wazuh-mcp/wazuh-mcp.sh"
+    },
+    "velociraptor": {
+      "command": "/workspace/extra/velociraptor-mcp/velociraptor-mcp.sh"
+    },
     "ollama": {
       "command": "/workspace/extra/ollama/ollama-mcp.sh"
     },

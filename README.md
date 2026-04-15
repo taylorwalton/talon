@@ -78,6 +78,8 @@ Talon is an automated AI SOC analyst built by <a href="https://www.socfortress.c
 │  opensearch_anon    — anonymizing proxy (PII → tokens)     │
 │  mysql-mcp          — CoPilot DB (alerts, assets, agents)  │
 │  copilot-mcp        — CoPilot REST API write-back          │
+│  wazuh-mcp          — Wazuh manager API (agents, rules, SCA) │
+│  velociraptor-mcp   — Velociraptor DFIR (artifacts, VQL, collections) │
 │  ollama (optional)  — local LLM for sensitive event data   │
 └────────────────────────────────────────────────────────────┘
 ```
@@ -217,7 +219,41 @@ bash copilot-mcp/setup.sh
 > COPILOT_URL=http://host.docker.internal:5000
 > ```
 
-### 8. Configure local LLM analysis (optional)
+### 8. Configure Wazuh MCP credentials
+
+```bash
+bash wazuh-mcp/setup.sh
+# Edit wazuh-mcp/.env — set WAZUH_PROD_URL, WAZUH_PROD_USERNAME, WAZUH_PROD_PASSWORD
+```
+
+The Wazuh MCP server gives the agent direct access to the Wazuh manager API — querying agent inventory, network connections, installed packages, running processes, SCA results, and security rules. Credentials must be for a Wazuh user with at least read-only API access.
+
+> **Note:** The default Wazuh manager API port is `55000`. If the manager is on the same host as Talon, use `host.docker.internal`:
+> ```
+> WAZUH_PROD_URL=https://host.docker.internal:55000
+> ```
+> Set `WAZUH_PROD_SSL_VERIFY=false` if the manager uses a self-signed certificate.
+
+### 9. Configure Velociraptor MCP credentials
+
+```bash
+bash velociraptor-mcp/setup.sh
+```
+
+Then copy your Velociraptor API config into the directory:
+
+```bash
+# On your Velociraptor server, generate a client config:
+velociraptor config api_client --name talon > api.config.yaml
+# Then copy it to your Talon install:
+cp api.config.yaml velociraptor-mcp/api.config.yaml
+```
+
+The Velociraptor MCP server gives the agent direct DFIR capability — querying client inventory, running VQL queries, listing and collecting artifacts (Windows and Linux), and retrieving collection results. The `VELOCIRAPTOR_API_KEY` in `.env` is set to `api.config.yaml` by default; the wrapper script resolves it to an absolute path automatically, so the same `.env` works on both the host and inside the container.
+
+> **Note:** Set `VELOCIRAPTOR_SSL_VERIFY=false` in `velociraptor-mcp/.env` if your Velociraptor server uses a self-signed certificate.
+
+### 10. Configure local LLM analysis (optional)
 
 Talon can route raw SIEM event analysis through an open-source LLM instead of the Claude cloud model. Combined with the anonymizing proxy — which replaces PII with session tokens before any LLM call — this keeps sensitive data interpretation off Anthropic's API entirely.
 
@@ -280,7 +316,7 @@ cp ollama/.env.example ollama/.env
 
 ---
 
-### 9. Set up MemPalace persistent memory
+### 11. Set up MemPalace persistent memory
 
 MemPalace gives the SOC agent long-term memory — past investigation outcomes, asset metadata, confirmed false positives, and IOC history are stored in a local ChromaDB + SQLite knowledge graph and retrieved automatically at the start of each investigation.
 
@@ -292,13 +328,13 @@ This creates the local venv and the `mempalace-data/` directory where the palace
 
 > **Note:** `mempalace-data/` is gitignored and persists across container restarts. The writable mount entry added in Step 4 is what allows the agent to write to it. Back up `mempalace-data/` alongside your other `.env` files.
 
-### 10. Build the container
+### 12. Build the container
 
 ```bash
 CONTAINER_RUNTIME=docker ./container/build.sh
 ```
 
-### 11. Start the service
+### 13. Start the service
 
 **macOS:**
 ```bash
@@ -364,7 +400,7 @@ systemctl --user enable --now talon
 loginctl enable-linger
 ```
 
-### 12. Verify
+### 14. Verify
 
 ```bash
 # /health is unauthenticated
@@ -401,6 +437,9 @@ curl -s -N -X POST http://localhost:3100/message \
 | `siem/.env` | OpenSearch credentials — gitignored |
 | `mysql/.env` | CoPilot MySQL credentials — gitignored |
 | `copilot-mcp/.env` | CoPilot REST API credentials — gitignored |
+| `wazuh-mcp/.env` | Wazuh manager API credentials — gitignored |
+| `velociraptor-mcp/.env` | Velociraptor API config path — gitignored |
+| `velociraptor-mcp/api.config.yaml` | Velociraptor API client config — gitignored, copy from server |
 | `ollama/.env` | Optional Ollama host override — gitignored, omit if using defaults |
 | `mempalace-data/` | MemPalace palace data (ChromaDB + SQLite) — gitignored, back up separately |
 | `.env` | `CLAUDE_CODE_OAUTH_TOKEN`, `WEBHOOK_URL`, `WEBHOOK_SECRET` — gitignored |
@@ -438,7 +477,7 @@ To add a new alert type, create the corresponding `.txt` file — no code change
 | `src/task-scheduler.ts` | 15-minute scheduled alert sweep |
 | `src/container-runner.ts` | Spawns agent containers with mounts |
 | `groups/copilot/CLAUDE.md` | SOC agent investigation workflow |
-| `groups/copilot/.mcp.json` | MCP server registry (opensearch, mysql, copilot, ollama) |
+| `groups/copilot/.mcp.json` | MCP server registry (opensearch, mysql, copilot, wazuh, velociraptor, ollama) |
 | `siem/anon_proxy/anon_proxy.py` | Anonymizing MCP proxy |
 | `siem/anon_proxy/fields.yaml` | PII field definitions (git-pullable) |
 | `container/Dockerfile` | Agent container image |
@@ -472,7 +511,7 @@ If you find this project useful and want to support continued development, consi
 
 ## Based On
 
-Talon is a fork of [NanoClaw](https://github.com/qwibitai/nanoclaw), a minimal Claude Agent SDK harness where agents run in isolated Linux containers. The core orchestration engine, container runner, channel system, and IPC layer are NanoClaw. Everything in `groups/copilot/`, `siem/`, `mysql/`, `copilot-mcp/`, `ollama/`, and `src/channels/http.ts` is purpose-built for the SOCfortress stack.
+Talon is a fork of [NanoClaw](https://github.com/qwibitai/nanoclaw), a minimal Claude Agent SDK harness where agents run in isolated Linux containers. The core orchestration engine, container runner, channel system, and IPC layer are NanoClaw. Everything in `groups/copilot/`, `siem/`, `mysql/`, `copilot-mcp/`, `wazuh-mcp/`, `velociraptor-mcp/`, `ollama/`, and `src/channels/http.ts` is purpose-built for the SOCfortress stack.
 
 ---
 

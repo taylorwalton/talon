@@ -31,6 +31,10 @@ groups/copilot/prompts/*
 .env
 siem/.env
 mysql/.env
+copilot-mcp/.env
+wazuh-mcp/.env
+velociraptor-mcp/.env
+velociraptor-mcp/api.config.yaml
 
 # Temp files
 .tmp-*
