@@ -46,7 +46,7 @@ export class HttpChannel implements Channel {
       schedule_type: 'cron' as const,
       schedule_value: '*/15 * * * *',
       context_mode: 'group' as const,
-      status: 'active' as const,
+      status: 'paused' as const,
       created_at: new Date().toISOString(),
       next_run: null as string | null,
       prompt: `You are running as a scheduled SOC monitor. Follow these steps exactly for each alert.
