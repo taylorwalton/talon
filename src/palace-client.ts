@@ -126,9 +126,7 @@ export async function searchPalace(input: SearchInput): Promise<unknown> {
 // Durability sweeper: CoPilot tracks drawer_ids returned from add_drawer
 // and calls this to remove expired one-off lessons from the palace.
 // The mempalace tool returns {success: bool, drawer_id, error?}.
-export async function forgetLesson(
-  input: ForgetLessonInput,
-): Promise<unknown> {
+export async function forgetLesson(input: ForgetLessonInput): Promise<unknown> {
   return runPalaceCall({
     op: 'delete_drawer',
     drawer_id: input.drawer_id,
