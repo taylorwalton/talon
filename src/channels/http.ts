@@ -6,6 +6,7 @@ import { createTask, getTaskById, getTasksForGroup } from '../db.js';
 import { logger } from '../logger.js';
 import {
   addLesson,
+  forgetLesson,
   searchPalace,
   VALID_LESSON_TYPES,
   LessonType,
@@ -611,6 +612,49 @@ ${stepOverrideInstruction}4. Write back to CoPilot using job_id="${jobId}" and t
         return;
       }
 
+      // POST /palace/forget — CoPilot's durability sweeper calls this to
+      // remove an expired one-off lesson from MemPalace by drawer_id.
+      // Wraps mempalace_delete_drawer. Idempotent: a missing drawer_id
+      // returns success=false but is not an HTTP error — the sweeper
+      // still flips the row to 'expired' either way.
+      if (req.method === 'POST' && req.url === '/palace/forget') {
+        let body = '';
+        req.on('data', (chunk) => {
+          body += chunk;
+        });
+        req.on('end', async () => {
+          let parsed: { drawer_id?: string } = {};
+          try {
+            parsed = JSON.parse(body);
+          } catch {
+            res.writeHead(400, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'Invalid JSON' }));
+            return;
+          }
+
+          const { drawer_id } = parsed;
+          if (!drawer_id || typeof drawer_id !== 'string') {
+            res.writeHead(400, { 'Content-Type': 'application/json' });
+            res.end(
+              JSON.stringify({ error: 'drawer_id (string) is required' }),
+            );
+            return;
+          }
+
+          try {
+            const result = await forgetLesson({ drawer_id });
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify(result));
+          } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            logger.error({ err: msg }, 'POST /palace/forget failed');
+            res.writeHead(500, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: msg }));
+          }
+        });
+        return;
+      }
+
       if (req.method === 'OPTIONS') {
         res.writeHead(204, {
           'Access-Control-Allow-Origin': '*',
@@ -709,6 +753,7 @@ ${stepOverrideInstruction}4. Write back to CoPilot using job_id="${jobId}" and t
         console.log(
           `  GET  /palace/search  ?customer_code=acme&query=...&room=environment&limit=5`,
         );
+        console.log(`  POST /palace/forget   { "drawer_id": "..." }`);
         console.log(`  GET  /status`);
         console.log(`  GET  /health\n`);
         resolve();

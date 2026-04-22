@@ -33,6 +33,10 @@ export interface SearchInput {
   limit?: number;
 }
 
+export interface ForgetLessonInput {
+  drawer_id: string;
+}
+
 export const VALID_LESSON_TYPES: ReadonlySet<LessonType> = new Set([
   'environment',
   'false_positives',
@@ -116,5 +120,17 @@ export async function searchPalace(input: SearchInput): Promise<unknown> {
     wing: input.customer_code,
     room: input.room,
     limit: input.limit ?? 5,
+  });
+}
+
+// Durability sweeper: CoPilot tracks drawer_ids returned from add_drawer
+// and calls this to remove expired one-off lessons from the palace.
+// The mempalace tool returns {success: bool, drawer_id, error?}.
+export async function forgetLesson(
+  input: ForgetLessonInput,
+): Promise<unknown> {
+  return runPalaceCall({
+    op: 'delete_drawer',
+    drawer_id: input.drawer_id,
   });
 }
