@@ -525,8 +525,8 @@ Reviews can generate lessons fast. Two guards keep the palace useful:
 | 13 | `template_override` param on `POST /investigate` | NanoClaw | ✅ Done |
 | 14 | NanoClaw palace HTTP endpoints: `POST /palace/lesson` + `GET /palace/search` wrapping MemPalace MCP tools | NanoClaw | ✅ Done |
 | 15 | Review MySQL tables (`ai_analyst_review`, `ai_analyst_ioc_review`, `ai_analyst_palace_lesson`) | CoPilot | ✅ Done |
-| 16 | CoPilot REST endpoints: review submit, replay, palace lesson queue | CoPilot | Planned |
-| 17 | CoPilot async palace drainer (POSTs queued lessons to NanoClaw `/palace/lesson`) | CoPilot | Planned |
+| 16 | CoPilot REST endpoints: review submit, replay, palace lesson queue | CoPilot | ✅ Done |
+| 17 | CoPilot async palace drainer (POSTs queued lessons to NanoClaw `/palace/lesson`) | CoPilot | ✅ Done |
 | 18 | CoPilot UI: inline review panel + teach-the-palace | CoPilot | Planned |
 | 19 | CoPilot UI: re-run / A-B template comparison modal | CoPilot | Planned |
 | 20 | CoPilot UI: feedback dashboard (selection accuracy, flagged steps, lesson hit rate) | CoPilot | Planned |
