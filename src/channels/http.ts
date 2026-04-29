@@ -225,6 +225,11 @@ export class HttpChannel implements Channel {
             containerPath: 'mempalace-data',
             readonly: false,
           },
+          {
+            hostPath: path.join(process.cwd(), 'shuffle-mcp'),
+            containerPath: 'shuffle-mcp',
+            readonly: true,
+          },
         ],
       },
     };

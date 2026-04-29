@@ -23,6 +23,9 @@
     },
     "mempalace": {
       "command": "/workspace/extra/mempalace/mempalace-mcp.sh"
+    },
+    "shuffle": {
+      "command": "/workspace/extra/shuffle-mcp/shuffle-mcp.sh"
     }
   }
 }
