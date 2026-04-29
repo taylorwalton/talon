@@ -192,9 +192,15 @@ Response (typical):
   "skipped": 0,
   "failed": 0,
   "outcomes": [
-    {"route_id": 4, "route_name": "SOC Slack #alerts", "channel": "slack_webhook", "status": "sent", "latency_ms": 287}
+    {"route_id": 4, "route_name": "SOC IR distribution", "channel": "smtp_email", "status": "sent", "latency_ms": 1840}
   ]
 }
 ```
 
 That's it — proceed to step 6c (deliver to analyst).
+
+> **Phase 1 channel scope:** CoPilot Phase 1 ships with `smtp_email`
+> only. Slack, Teams, Outlook, and the rest of the catalog land in
+> Phase 2 via the Shuffle MCP. From Talon's perspective the dispatch
+> call doesn't change — CoPilot still owns the routing — but expect
+> outcomes with `"channel": "shuffle"` once Phase 2 ships.
