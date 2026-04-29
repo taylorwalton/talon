@@ -54,6 +54,17 @@ RUN python3 -m venv /opt/velociraptor-mcp \
     && /opt/velociraptor-mcp/bin/pip install --quiet \
        "git+https://github.com/socfortress/velociraptor-mcp-server.git"
 
+# Install shuffle-mcp-server into a system venv (used by the Shuffle MCP wrapper)
+# Gives the agent interactive access to Shuffle's 3,000+ apps catalog —
+# RunAppAgentTool / GetExecutionResultTool for natural-language driving of
+# any authenticated app, plus AuthenticateTool / GetAppsTool for discovery.
+# This is separate from CoPilot's notification-dispatch path: that's a
+# fire-and-record server-to-server call; this is for mid-investigation
+# tool use (e.g. "look up this user's email via Outlook search").
+RUN python3 -m venv /opt/shuffle-mcp \
+    && /opt/shuffle-mcp/bin/pip install --quiet \
+       "git+https://github.com/socfortress/shuffle-mcp-server.git"
+
 # Install mempalace + chromadb into a system venv (used by the MemPalace MCP wrapper)
 # chromadb is large — this layer is cached after the first build
 RUN python3 -m venv /opt/mempalace \

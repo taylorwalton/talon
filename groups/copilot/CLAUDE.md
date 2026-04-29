@@ -514,6 +514,11 @@ investigation if dispatch errors. Full instructions: `notifications.md`
   - `CollectArtifactDetailsTool` / `FindArtifactDetailsTool` — get artifact spec and parameters before collecting
   - `CollectArtifactTool` — initiate an artifact collection on a client (returns flow ID)
   - `GetCollectionResultsTool` — retrieve results for a completed collection (includes retry logic)
+- `mcp__shuffle__*` — Shuffle's hosted catalog of 3,000+ SaaS integrations. Use for **interactive** mid-investigation tool calls (e.g. "search Outlook for this user's mailbox," "post a Slack thread to #soc," "open a Jira ticket"). For post-investigation notification fan-out use `mcp__copilot__DispatchNotificationsTool` instead — that path goes through CoPilot's routing engine.
+  - `AuthenticateTool` — verify the Shuffle API key + report active org scope
+  - `GetAppsTool` — list every Shuffle app the key has access to (including the customer's authenticated apps in their org)
+  - `RunAppAgentTool` — kick off an AI-agent run scoped to one app with natural-language `input_text`. Returns `execution_id` + `authorization` for polling.
+  - `GetExecutionResultTool` — poll for a run's terminal state (`FINISHED`, `ABORTED`, etc.). Async pattern — call after `RunAppAgentTool` and re-poll until status settles.
 - `WebSearch`, `WebFetch` — VirusTotal, Shodan, AbuseIPDB, MITRE ATT&CK, threat intel lookups
 - `Bash` — data processing, scripting (sandboxed in this container)
 - `mcp__nanoclaw__schedule_task` — schedule recurring sweeps and monitoring tasks

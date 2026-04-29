@@ -37,6 +37,8 @@ copilot-mcp/.env
 wazuh-mcp/.env
 velociraptor-mcp/.env
 velociraptor-mcp/api.config.yaml
+shuffle-mcp/.env
+shuffle-mcp/.venv/
 
 # Temp files
 .tmp-*
