@@ -449,6 +449,17 @@ Deliver the report via `send_message` with these sections:
 
 ---
 
+#### 6d — Fan out per-customer notifications (best-effort)
+
+After step 6c's analyst delivery, optionally fan the report out to the
+customer's configured Slack/email/etc. destinations via CoPilot's
+notification engine. **One HTTP call** to `POST /api/notifications/dispatch`
+with the report fields — CoPilot does the route lookup, formatting,
+delivery, and idempotency. **Do not** fail the investigation if dispatch
+errors. Full instructions: `notifications.md` (in this group's directory).
+
+---
+
 ## Capabilities
 
 **Active tools:**
