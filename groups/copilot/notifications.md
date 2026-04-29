@@ -15,19 +15,19 @@ notification engine can fan the result out to per-customer destinations
 — Slack channels, email distribution lists, etc. — based on rules a
 human admin configured in the CoPilot UI.
 
-Your job is **one HTTP call** to CoPilot's `/notifications/dispatch`
-endpoint with the relevant fields from the report you just wrote. CoPilot
-does the rest:
+Your job is **one MCP tool call** — `mcp__copilot__DispatchNotificationsTool`
+— with the relevant fields from the report you just wrote. CoPilot does
+the rest:
 
 1. Looks up the customer's notification routes
 2. Filters by trigger + severity threshold
 3. Formats the message body per channel
-4. Calls Slack / SMTP / etc.
+4. Dispatches via SMTP (direct) or Shuffle (Slack/Outlook/Teams/etc.)
 5. Records the outcome in `notification_dispatch_log`
 6. Enforces idempotency (re-runs are no-ops)
 
 You don't need to query the routes table. You don't need to format the
-message. You don't need to call Slack or SMTP yourself.
+message. You don't need to call Slack or SMTP or Shuffle yourself.
 
 ---
 
@@ -48,24 +48,22 @@ returns successfully. Do not call:
 
 ## How to call
 
-Use Bash with curl. The CoPilot API key and base URL are already in your
-environment via the existing `copilot-mcp` setup — same credentials you
-use for the MCP write-back.
+Use the **`mcp__copilot__DispatchNotificationsTool`** tool. Auth and
+base URL are handled by the same `copilot-mcp` server you already use
+for `SubmitAiAnalystReportTool`, `SubmitAiAnalystIocsTool`, etc. — no
+Bash, no curl, no token juggling.
 
-```bash
-curl -fsS -X POST "${COPILOT_BASE_URL}/api/notifications/dispatch" \
-  -H "Authorization: Bearer ${COPILOT_API_KEY}" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "customer_code": "<the alert's customer_code>",
-    "alert_id": <the integer alert_id>,
-    "trigger": "<one of: investigation_complete | severity_critical_or_high>",
-    "severity_assessment": "<Critical | High | Medium | Low | Informational>",
-    "summary": "<the one-paragraph summary you wrote in the report>",
-    "alert_name": "<the original alert name>",
-    "report_url": "<deep link to the report in CoPilot, if you have one>"
-  }'
-```
+Arguments:
+
+| Field | Required? | Source |
+|-------|-----------|--------|
+| `customer_code` | yes | from the alert (you queried it in step 1) |
+| `alert_id` | yes | the integer alert ID, same as `ai_analyst_report.alert_id` |
+| `trigger` | yes | pick one — see the table below |
+| `severity_assessment` | yes | same value you wrote to `ai_analyst_report.severity_assessment` |
+| `summary` | yes | same value you wrote to `ai_analyst_report.summary` |
+| `alert_name` | recommended | the original alert title — helps recipients identify it |
+| `report_url` | optional | deep link to the report in CoPilot if you have one |
 
 ### Picking the trigger
 
@@ -165,25 +163,23 @@ single-call client.
 After completing investigation for alert 147 (customer 00001, severity
 Critical):
 
-```bash
-# Step 6b already wrote the report — alert_id 147, severity Critical, etc.
+```
+# Step 6b already wrote the report via SubmitAiAnalystReportTool —
+# alert_id 147, severity Critical, etc.
 
-# Step 6d — fan out:
-curl -fsS -X POST "${COPILOT_BASE_URL}/api/notifications/dispatch" \
-  -H "Authorization: Bearer ${COPILOT_API_KEY}" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "customer_code": "00001",
-    "alert_id": 147,
-    "trigger": "severity_critical_or_high",
-    "severity_assessment": "Critical",
-    "summary": "BloodHound CE healthcheck firing rule 200288 (curl). Confirmed false positive — Docker HEALTHCHECK on piHole agent 088. Recommend rule exception.",
-    "alert_name": "Curl process start",
-    "report_url": "https://copilot.example.com/incident-management/alert/147"
-  }'
+# Step 6d — fan out via copilot-mcp:
+mcp__copilot__DispatchNotificationsTool({
+    customer_code: "00001",
+    alert_id: 147,
+    trigger: "severity_critical_or_high",
+    severity_assessment: "Critical",
+    summary: "BloodHound CE healthcheck firing rule 200288 (curl). Confirmed false positive — Docker HEALTHCHECK on piHole agent 088. Recommend rule exception.",
+    alert_name: "Curl process start",
+    report_url: "https://copilot.example.com/incident-management/alert/147"
+})
 ```
 
-Response (typical):
+Response (typical, SMTP route):
 ```json
 {
   "success": true,
@@ -197,10 +193,25 @@ Response (typical):
 }
 ```
 
-That's it — proceed to step 6c (deliver to analyst).
+Response (typical, Shuffle route to Slack):
+```json
+{
+  "success": true,
+  "routes_matched": 1,
+  "dispatched": 1,
+  "skipped": 0,
+  "failed": 0,
+  "outcomes": [
+    {
+      "route_id": 7,
+      "route_name": "SOC team Slack #alerts",
+      "channel": "shuffle",
+      "status": "sent",
+      "latency_ms": 412,
+      "shuffle_execution_id": "exec-abc123"
+    }
+  ]
+}
+```
 
-> **Phase 1 channel scope:** CoPilot Phase 1 ships with `smtp_email`
-> only. Slack, Teams, Outlook, and the rest of the catalog land in
-> Phase 2 via the Shuffle MCP. From Talon's perspective the dispatch
-> call doesn't change — CoPilot still owns the routing — but expect
-> outcomes with `"channel": "shuffle"` once Phase 2 ships.
+That's it — proceed to step 6c (deliver to analyst).
