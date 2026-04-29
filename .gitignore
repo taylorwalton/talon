@@ -22,6 +22,7 @@ groups/copilot/*
 !groups/global/CLAUDE.md
 !groups/copilot/CLAUDE.md
 !groups/copilot/.mcp.json
+!groups/copilot/notifications.md
 !groups/copilot/prompts/
 groups/copilot/prompts/*
 !groups/copilot/prompts/*.txt
