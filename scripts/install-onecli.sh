@@ -78,7 +78,9 @@ CANDIDATES+=("http://127.0.0.1:${ONECLI_PORT}")
 CANDIDATES+=("http://localhost:${ONECLI_PORT}")
 
 probe_health() {
-  curl -sf -m 2 "${1}/health" >/dev/null 2>&1
+  # OneCLI 1.5+ uses /api/health; fall back to /health for older versions.
+  curl -sf -m 2 "${1}/api/health" >/dev/null 2>&1 || \
+    curl -sf -m 2 "${1}/health" >/dev/null 2>&1
 }
 
 log "probing gateway candidates: ${CANDIDATES[*]}"
