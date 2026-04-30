@@ -24,23 +24,25 @@ if [ "$(id -u)" = "0" ] && [ -f /workspace/project/.env ]; then
 fi
 
 # --- Per-MCP credential isolation ---
-# For each MCP whose dedicated user exists, copy the bind-mounted .env into
-# a private tmpfs path readable only by that user, then shadow the original
-# so the agent (RUN_UID) can't read it.
+# Container-runner mounts the original .env to two paths via docker -v:
 #
-# Wrappers in /workspace/extra/<mcp>/ use `sudo -u mcp-<mcp>` to read
-# /etc/mcp-secrets/<mcp>.env at MCP-launch time. Sudoers config in
-# /etc/sudoers.d/mcp-isolation grants node passwordless access to those uids.
-if [ "$(id -u)" = "0" ] && [ -d /etc/mcp-secrets ]; then
+#   /etc/mcp-staging/<mcp>.env  (root-readable copy, parent dir mode 700)
+#   /workspace/extra/<mcp>/.env (shadowed by /dev/null — agent sees empty)
+#
+# We consume the staging copy here, copy it to /etc/mcp-secrets/<mcp>.env,
+# then chown to the MCP-specific uid and chmod 600. Wrappers in
+# /workspace/extra/<mcp>/ use `sudo -u mcp-<mcp>` to read it at MCP-launch
+# time. Sudoers config in /etc/sudoers.d/mcp-isolation grants node
+# passwordless access to those uids.
+if [ "$(id -u)" = "0" ] && [ -d /etc/mcp-secrets ] && [ -d /etc/mcp-staging ]; then
   for mcp_dir in siem; do
-    src_env="/workspace/extra/${mcp_dir}/.env"
-    dst_env="/etc/mcp-secrets/${mcp_dir}.env"
+    staging="/etc/mcp-staging/${mcp_dir}.env"
+    dst="/etc/mcp-secrets/${mcp_dir}.env"
     user_name="mcp-${mcp_dir}"
-    if [ -f "$src_env" ] && id -u "$user_name" >/dev/null 2>&1; then
-      cp "$src_env" "$dst_env"
-      chown "${user_name}:${user_name}" "$dst_env"
-      chmod 600 "$dst_env"
-      mount --bind /dev/null "$src_env" || true
+    if [ -f "$staging" ] && id -u "$user_name" >/dev/null 2>&1; then
+      cp "$staging" "$dst"
+      chown "${user_name}:${user_name}" "$dst"
+      chmod 600 "$dst"
     fi
   done
 fi

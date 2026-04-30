@@ -96,7 +96,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends sudo \
     # Per-MCP secrets directory: traversable but not listable
     && mkdir -p /etc/mcp-secrets \
     && chown root:root /etc/mcp-secrets \
-    && chmod 0711 /etc/mcp-secrets
+    && chmod 0711 /etc/mcp-secrets \
+    # Staging directory for the read-only host bind mount of the original
+    # .env (so entrypoint can copy it before chowning to mcp-* uid).
+    # Mode 700 means no other user can list or traverse this dir.
+    && mkdir -p /etc/mcp-staging \
+    && chown root:root /etc/mcp-staging \
+    && chmod 0700 /etc/mcp-staging
 
 # Create app directory
 WORKDIR /app
