@@ -23,6 +23,16 @@ ONECLI_PORT="${ONECLI_PORT:-10254}"
 HEALTH_TIMEOUT="${HEALTH_TIMEOUT:-30}"
 ENV_FILE="${ENV_FILE:-$(pwd)/.env}"
 
+# OneCLI compose lives at $HOME/.onecli/ by default (root install -> /root/.onecli/).
+# Its env_file directive loads $HOME/.env one level up (used at container runtime
+# for vars like GATEWAY_SKIP_VERIFY_HOSTS that the gateway process reads).
+# A separate $HOME/.onecli/.env is used by docker-compose for parse-time
+# variable substitution (e.g. ${ONECLI_BIND_HOST}, ${ONECLI_MTU}).
+ONECLI_HOME_DIR="${ONECLI_HOME_DIR:-$HOME/.onecli}"
+ONECLI_COMPOSE="${ONECLI_COMPOSE:-$ONECLI_HOME_DIR/docker-compose.yml}"
+ONECLI_HOME_ENV="${ONECLI_HOME_ENV:-$HOME/.env}"
+ONECLI_COMPOSE_ENV="${ONECLI_COMPOSE_ENV:-$ONECLI_HOME_DIR/.env}"
+
 log()  { printf '[install-onecli] %s\n' "$*"; }
 warn() { printf '[install-onecli] WARN: %s\n' "$*" >&2; }
 fail() { printf '[install-onecli] FAIL: %s\n' "$*" >&2; exit "${2:-1}"; }
@@ -63,6 +73,98 @@ if [ -x "$HOME/.local/bin/onecli" ]; then
       printf '\n# Added by nanoclaw install-onecli.sh\nexport PATH="$HOME/.local/bin:$PATH"\n' >> "$rc"
     fi
   done
+fi
+
+# --- Phase 2.5: configure OneCLI compose for Linux Docker (bind host + MTU) ---
+#
+# OneCLI's compose file uses ${ONECLI_BIND_HOST:-127.0.0.1} for port mapping
+# and creates a user-defined bridge network whose default MTU is 1500. On
+# Linux + Docker, two adjustments are needed for the gateway to be reachable
+# from sibling containers AND for upstream TLS handshakes to complete:
+#
+#   ONECLI_BIND_HOST=<docker0 bridge IP>  -> ports reachable from sibling
+#                                            containers (not just loopback)
+#   com.docker.network.driver.mtu=1450    -> matches typical cloud VM MTU,
+#                                            avoids fragmented MITM packets
+#
+# We write these to $HOME/.onecli/.env (the compose-dir env file used for
+# parse-time substitution) and patch the compose YAML to add the MTU
+# driver_opts block if it's not already present. Skipped on macOS (no
+# docker0 interface and no MTU issue with Desktop's vmnet).
+
+ONECLI_RESTART_NEEDED=0
+
+if [ -d /sys/class/net/docker0 ]; then
+  BRIDGE_IP=$(ip -4 addr show docker0 2>/dev/null | awk '/inet /{print $2}' | cut -d/ -f1 | head -1)
+
+  # Detect host MTU from default route's interface; fall back to 1450 (safe)
+  DEFAULT_IFACE=$(ip route show default 2>/dev/null | awk '/default/{for(i=1;i<=NF;i++)if($i=="dev"){print $(i+1);exit}}')
+  HOST_MTU=$(cat /sys/class/net/"${DEFAULT_IFACE:-eth0}"/mtu 2>/dev/null || echo 1450)
+  TARGET_MTU="${ONECLI_MTU:-$HOST_MTU}"
+
+  if [ -n "$BRIDGE_IP" ] && [ -d "$ONECLI_HOME_DIR" ]; then
+    [ -f "$ONECLI_COMPOSE_ENV" ] || touch "$ONECLI_COMPOSE_ENV" 2>/dev/null
+
+    # Helper: idempotent set in a .env file
+    set_env_kv() {
+      local file=$1 key=$2 value=$3
+      if grep -qE "^${key}=" "$file" 2>/dev/null; then
+        local cur
+        cur=$(grep -E "^${key}=" "$file" | head -1 | cut -d= -f2- | tr -d '"' | tr -d "'")
+        if [ "$cur" != "$value" ]; then
+          sed -i "s|^${key}=.*|${key}=${value}|" "$file"
+          log "  $key: $cur -> $value"
+          return 0
+        fi
+        return 1
+      else
+        printf '%s=%s\n' "$key" "$value" >> "$file"
+        log "  $key=$value (added)"
+        return 0
+      fi
+    }
+
+    log "configuring OneCLI compose-dir env: $ONECLI_COMPOSE_ENV"
+    if set_env_kv "$ONECLI_COMPOSE_ENV" ONECLI_BIND_HOST "$BRIDGE_IP"; then ONECLI_RESTART_NEEDED=1; fi
+    if set_env_kv "$ONECLI_COMPOSE_ENV" ONECLI_MTU "$TARGET_MTU"; then ONECLI_RESTART_NEEDED=1; fi
+
+    # Patch compose YAML to add MTU driver_opts under the onecli network if missing.
+    # Targets the trailing block:
+    #   networks:
+    #     onecli:
+    #       driver: bridge
+    if [ -f "$ONECLI_COMPOSE" ]; then
+      if ! grep -qE 'com\.docker\.network\.driver\.mtu' "$ONECLI_COMPOSE"; then
+        log "patching $ONECLI_COMPOSE to add MTU driver_opts"
+        cp -p "$ONECLI_COMPOSE" "${ONECLI_COMPOSE}.bak.$(date +%Y%m%d-%H%M%S)"
+        # Append driver_opts after `driver: bridge` line in the onecli network block.
+        # Conservative: only modify if the exact pattern matches.
+        sed -i '/^networks:$/,$ {
+          /^  onecli:$/,/^[^ ]/ {
+            /^    driver: bridge$/a\
+    driver_opts:\
+      com.docker.network.driver.mtu: "${ONECLI_MTU:-1450}"
+          }
+        }' "$ONECLI_COMPOSE"
+        ONECLI_RESTART_NEEDED=1
+      else
+        log "compose already has MTU driver_opts"
+      fi
+    fi
+  fi
+fi
+
+if [ "$ONECLI_RESTART_NEEDED" -eq 1 ] && [ -f "$ONECLI_COMPOSE" ]; then
+  log "recreating OneCLI containers + network to apply config..."
+  if docker compose -p onecli -f "$ONECLI_COMPOSE" down >/dev/null 2>&1 \
+     && docker compose -p onecli -f "$ONECLI_COMPOSE" up -d >/dev/null 2>&1; then
+    log "OneCLI recreated"
+    sleep 5  # give containers a moment to come up before health check
+  else
+    warn "OneCLI recreate failed — try manually:"
+    warn "  docker compose -p onecli -f $ONECLI_COMPOSE down"
+    warn "  docker compose -p onecli -f $ONECLI_COMPOSE up -d"
+  fi
 fi
 
 # --- Phase 3: detect reachable gateway URL ---
@@ -252,7 +354,89 @@ else
   AUTH_STATUS="no agents created — manual setup needed"
 fi
 
-# --- Phase 7: report ---
+# --- Phase 7: configure GATEWAY_SKIP_VERIFY_HOSTS for self-signed internal hosts ---
+#
+# OneCLI's TLS MITM verifies upstream certs. Internal services (OpenSearch,
+# Wazuh, Velociraptor) typically use self-signed certs and would otherwise
+# fail with "serving MITM connection" errors.
+#
+# We auto-detect by scanning every */.env in the install dir for a
+# VERIFY_CERTS=false / SSL_VERIFY=false / VERIFY_SSL=false flag, then
+# extracting the host from any URL/HOST/HOSTS variable in the same file.
+# The result is written to OneCLI's env_file ($HOME/.env) which the
+# compose stack loads automatically.
+
+detect_skip_hosts() {
+  local hosts=""
+  for envfile in "$(pwd)"/*/.env; do
+    [ -f "$envfile" ] || continue
+    if grep -qiE '^[A-Z_]*(VERIFY_CERTS?|SSL_VERIFY|VERIFY_SSL)=(false|0|no)' "$envfile" 2>/dev/null; then
+      while IFS= read -r line; do
+        h=$(printf '%s' "$line" | sed -E 's#^[A-Z_]+=##; s#^["'"'"']##; s#["'"'"']$##; s#^https?://##; s#[:/].*##')
+        [ -n "$h" ] && hosts="${hosts}${h},"
+      done < <(grep -E '^[A-Z_]+(URL|HOSTS?)=https?://' "$envfile" 2>/dev/null)
+    fi
+  done
+  printf '%s' "$hosts" | tr ',' '\n' | grep -v '^$' | sort -u | tr '\n' ',' | sed 's/,$//'
+}
+
+if [ -n "${SKIP_VERIFY_HOSTS:-}" ]; then
+  HOSTS_LIST="$SKIP_VERIFY_HOSTS"
+  log "using SKIP_VERIFY_HOSTS override: $HOSTS_LIST"
+else
+  HOSTS_LIST=$(detect_skip_hosts)
+  if [ -n "$HOSTS_LIST" ]; then
+    log "auto-detected self-signed internal hosts: $HOSTS_LIST"
+  fi
+fi
+
+if [ -n "$HOSTS_LIST" ]; then
+  if [ ! -f "$ONECLI_HOME_ENV" ]; then
+    log "creating $ONECLI_HOME_ENV (OneCLI's env_file)"
+    touch "$ONECLI_HOME_ENV" 2>/dev/null || warn "could not create $ONECLI_HOME_ENV"
+  fi
+
+  RESTART_NEEDED=0
+  if [ -f "$ONECLI_HOME_ENV" ]; then
+    if grep -qE '^GATEWAY_SKIP_VERIFY_HOSTS=' "$ONECLI_HOME_ENV"; then
+      CURRENT=$(grep -E '^GATEWAY_SKIP_VERIFY_HOSTS=' "$ONECLI_HOME_ENV" | head -1 | cut -d= -f2- | tr -d '"' | tr -d "'")
+      if [ "$CURRENT" = "$HOSTS_LIST" ]; then
+        log "GATEWAY_SKIP_VERIFY_HOSTS already configured: $CURRENT"
+      else
+        log "updating GATEWAY_SKIP_VERIFY_HOSTS in $ONECLI_HOME_ENV"
+        log "  was: $CURRENT"
+        log "  now: $HOSTS_LIST"
+        sed -i "s|^GATEWAY_SKIP_VERIFY_HOSTS=.*|GATEWAY_SKIP_VERIFY_HOSTS=$HOSTS_LIST|" "$ONECLI_HOME_ENV"
+        RESTART_NEEDED=1
+      fi
+    else
+      log "appending GATEWAY_SKIP_VERIFY_HOSTS=$HOSTS_LIST to $ONECLI_HOME_ENV"
+      printf '\n# OneCLI: skip TLS verification for self-signed internal hosts\nGATEWAY_SKIP_VERIFY_HOSTS=%s\n' "$HOSTS_LIST" >> "$ONECLI_HOME_ENV"
+      RESTART_NEEDED=1
+    fi
+
+    if [ "$RESTART_NEEDED" -eq 1 ]; then
+      if [ -f "$ONECLI_COMPOSE" ]; then
+        log "restarting OneCLI to pick up new gateway env config..."
+        if docker compose -p onecli -f "$ONECLI_COMPOSE" up -d >/dev/null 2>&1; then
+          log "OneCLI restarted"
+          # Re-poll health since restart drops the gateway briefly
+          for _ in $(seq 1 10); do
+            probe_health "$ONECLI_URL" && break
+            sleep 1
+          done
+        else
+          warn "docker compose restart failed — restart manually:"
+          warn "  docker compose -p onecli -f $ONECLI_COMPOSE up -d"
+        fi
+      else
+        warn "OneCLI compose file not found at $ONECLI_COMPOSE — restart OneCLI manually"
+      fi
+    fi
+  fi
+fi
+
+# --- Phase 8: report ---
 
 echo
 log "DONE."
@@ -261,6 +445,7 @@ log "  CLI version:    $(onecli version 2>/dev/null | grep -oE '"version"[^,]*' 
 log "  Already done:   $([ "$ALREADY_INSTALLED" -eq 1 ] && echo yes || echo no)"
 log "  Auth status:    $AUTH_STATUS"
 log "  Agents:         ${DETECTED_GROUPS[*]:-(none)}"
+log "  Skip-verify:    ${HOSTS_LIST:-(none detected)}"
 echo
 
 if [ "$AUTH_STATUS" = "no agents created — manual setup needed" ]; then
