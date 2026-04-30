@@ -116,7 +116,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends sudo \
     && useradd -r -u 2004 -s /usr/sbin/nologin mcp-copilot \
     && useradd -r -u 2005 -s /usr/sbin/nologin mcp-shuffle \
     && useradd -r -u 2006 -s /usr/sbin/nologin mcp-velociraptor \
-    && useradd -r -u 2007 -s /usr/sbin/nologin mcp-cve \
+    # mcp-cve needs a home dir because the upstream cve-mcp-server
+    # creates a cache at ~/.cve-mcp/ at startup. -m creates it.
+    && useradd -r -u 2007 -m -d /home/mcp-cve -s /usr/sbin/nologin mcp-cve \
     # node may sudo to any mcp-* user without password
     && mkdir -p /etc/sudoers.d \
     && echo 'node ALL=(mcp-siem,mcp-mysql,mcp-wazuh,mcp-copilot,mcp-shuffle,mcp-velociraptor,mcp-cve) NOPASSWD: ALL' > /etc/sudoers.d/mcp-isolation \
