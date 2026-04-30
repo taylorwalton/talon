@@ -81,6 +81,7 @@ Talon is an automated AI SOC analyst built by <a href="https://www.socfortress.c
 │  wazuh-mcp          — Wazuh manager API (agents, rules, SCA) │
 │  velociraptor-mcp   — Velociraptor DFIR (artifacts, VQL, collections) │
 │  shuffle-mcp        — Shuffle SOAR catalog (3,000+ apps, agent runs) │
+│  cve-mcp            — CVE/EPSS/KEV + IOC enrichment (27 tools, 21 sources) │
 │  ollama (optional)  — local LLM for sensitive event data   │
 └────────────────────────────────────────────────────────────┘
 ```
@@ -114,7 +115,7 @@ See [docs/ANON_PROXY.md](docs/ANON_PROXY.md) for a full walkthrough of the proxy
 
 If [Ollama](https://ollama.com) is running on the same host, Talon automatically routes raw event interpretation through a local model rather than the cloud. This keeps the most sensitive step — reading the full raw event and extracting IOCs — entirely on-premises.
 
-The agent checks for Ollama at startup. If it's not running, the investigation continues without it — no errors, no configuration required. See step 13 of the deployment guide below for setup.
+The agent checks for Ollama at startup. If it's not running, the investigation continues without it — no errors, no configuration required. See step 14 of the deployment guide below for setup.
 
 ---
 
@@ -309,7 +310,20 @@ The Shuffle MCP server gives the agent interactive access to Shuffle's 3,000+ Sa
 
 > **Note:** Cloud users typically set `SHUFFLE_URL=https://shuffler.io`. Self-hosted users use their own region/instance. The `SHUFFLE_API_KEY` should be the same admin-scoped key configured in CoPilot's Shuffle connector. Skip this step if you don't use Shuffle — Talon will start without the MCP and continue with the other tools.
 
-### 13. Configure local LLM analysis (optional)
+### 13. Configure CVE MCP credentials (optional)
+
+```bash
+bash cve-mcp/setup.sh
+# Edit cve-mcp/.env — at minimum set NVD_API_KEY (free signup)
+```
+
+The CVE MCP server ([source](https://github.com/mukul975/cve-mcp-server)) provides 27 security intelligence tools across 21 data sources — CVE/EPSS/KEV/CVSS lookups, exploit availability, MITRE ATT&CK techniques, IP reputation (AbuseIPDB, GreyNoise, Shodan), threat intel (VirusTotal, urlscan, MalwareBazaar), and GitHub advisories. These replace the `WebFetch`/`WebSearch` scrapes Talon previously used for IOC enrichment with native, structured, cached calls.
+
+The MCP works **without any keys** but rate-limits aggressively (NVD: 5 req/30s, GitHub: 60/hr). With a free `NVD_API_KEY` and `GITHUB_TOKEN`, rates rise to 50 req/30s and 5,000/hr respectively. Optional Tier 2 keys (`VIRUSTOTAL_KEY`, `SHODAN_KEY`, `ABUSEIPDB_KEY`, etc.) unlock commercial threat intel data sources.
+
+> **Note:** Skip this step if you don't need CVE/IOC enrichment — Talon will start without the MCP and fall back to its existing `WebFetch`/`WebSearch` flow. NVD signup is free at [nvd.nist.gov/developers/request-an-api-key](https://nvd.nist.gov/developers/request-an-api-key).
+
+### 14. Configure local LLM analysis (optional)
 
 Talon can route raw SIEM event analysis through an open-source LLM instead of the Claude cloud model. Combined with the anonymizing proxy — which replaces PII with session tokens before any LLM call — this keeps sensitive data interpretation off Anthropic's API entirely.
 
@@ -372,7 +386,7 @@ cp ollama/.env.example ollama/.env
 
 ---
 
-### 14. Set up MemPalace persistent memory
+### 15. Set up MemPalace persistent memory
 
 MemPalace gives the SOC agent long-term memory — past investigation outcomes, asset metadata, confirmed false positives, and IOC history are stored in a local ChromaDB + SQLite knowledge graph and retrieved automatically at the start of each investigation.
 
@@ -390,13 +404,13 @@ This creates the local venv and the `mempalace-data/` directory where the palace
 
 > **Note:** `mempalace-data/` is gitignored and persists across container restarts. The writable mount entry added in Step 6 is what allows the agent to write to it. Back up `mempalace-data/` alongside your other `.env` files.
 
-### 15. Build the container
+### 16. Build the container
 
 ```bash
 CONTAINER_RUNTIME=docker ./container/build.sh
 ```
 
-### 16. Start the service
+### 17. Start the service
 
 **macOS:**
 ```bash
@@ -462,7 +476,7 @@ systemctl --user enable --now talon
 loginctl enable-linger
 ```
 
-### 17. Verify
+### 18. Verify
 
 ```bash
 # /health is unauthenticated
@@ -503,6 +517,7 @@ curl -s -N -X POST http://localhost:3100/message \
 | `velociraptor-mcp/.env` | Velociraptor API config path — gitignored |
 | `velociraptor-mcp/api.config.yaml` | Velociraptor API client config — gitignored, copy from server |
 | `shuffle-mcp/.env` | Shuffle SOAR API credentials — gitignored, optional |
+| `cve-mcp/.env` | CVE MCP API keys (NVD, GitHub, VirusTotal, etc.) — gitignored, optional |
 | `ollama/.env` | Optional Ollama host override — gitignored, omit if using defaults |
 | `mempalace-data/` | MemPalace palace data (ChromaDB + SQLite) — gitignored, back up separately |
 | `.env` | `CLAUDE_CODE_OAUTH_TOKEN`, `WEBHOOK_URL`, `WEBHOOK_SECRET` — gitignored |

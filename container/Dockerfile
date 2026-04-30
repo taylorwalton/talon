@@ -76,6 +76,17 @@ RUN python3 -m venv /opt/shuffle-mcp \
     && /opt/shuffle-mcp/bin/pip install --quiet \
        "git+https://github.com/socfortress/shuffle-mcp-server.git"
 
+# Install cve-mcp-server into a system venv (used by the CVE MCP wrapper).
+# Provides 27 security intelligence tools — CVE/EPSS/KEV/CVSS lookups,
+# exploit availability, IP reputation (AbuseIPDB, GreyNoise, Shodan),
+# threat intel (VirusTotal, urlscan, MalwareBazaar), MITRE ATT&CK,
+# GitHub advisories. Native MCP tools replace what Talon previously did
+# via WebFetch/WebSearch scrapes — faster, structured, and cached.
+# Source: https://github.com/mukul975/cve-mcp-server
+RUN python3 -m venv /opt/cve-mcp \
+    && /opt/cve-mcp/bin/pip install --quiet \
+       "git+https://github.com/mukul975/cve-mcp-server.git"
+
 # Install mempalace + chromadb into a system venv (used by the MemPalace MCP wrapper)
 # chromadb is large — this layer is cached after the first build
 RUN python3 -m venv /opt/mempalace \
@@ -105,9 +116,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends sudo \
     && useradd -r -u 2004 -s /usr/sbin/nologin mcp-copilot \
     && useradd -r -u 2005 -s /usr/sbin/nologin mcp-shuffle \
     && useradd -r -u 2006 -s /usr/sbin/nologin mcp-velociraptor \
+    && useradd -r -u 2007 -s /usr/sbin/nologin mcp-cve \
     # node may sudo to any mcp-* user without password
     && mkdir -p /etc/sudoers.d \
-    && echo 'node ALL=(mcp-siem,mcp-mysql,mcp-wazuh,mcp-copilot,mcp-shuffle,mcp-velociraptor) NOPASSWD: ALL' > /etc/sudoers.d/mcp-isolation \
+    && echo 'node ALL=(mcp-siem,mcp-mysql,mcp-wazuh,mcp-copilot,mcp-shuffle,mcp-velociraptor,mcp-cve) NOPASSWD: ALL' > /etc/sudoers.d/mcp-isolation \
     && chmod 0440 /etc/sudoers.d/mcp-isolation \
     # Per-MCP secrets directory: traversable but not listable
     && mkdir -p /etc/mcp-secrets \

@@ -39,6 +39,8 @@ velociraptor-mcp/.env
 velociraptor-mcp/api.config.yaml
 shuffle-mcp/.env
 shuffle-mcp/.venv/
+cve-mcp/.env
+cve-mcp/.venv/
 
 # Temp files
 .tmp-*

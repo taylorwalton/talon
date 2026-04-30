@@ -40,7 +40,7 @@ fi
 # pick up whatever the staging dir has. Extra-file naming convention:
 # /etc/mcp-staging/<id>.<filename> (e.g. velociraptor.api.config.yaml).
 if [ "$(id -u)" = "0" ] && [ -d /etc/mcp-secrets ] && [ -d /etc/mcp-staging ]; then
-  for mcp_id in siem mysql wazuh copilot shuffle velociraptor; do
+  for mcp_id in siem mysql wazuh copilot shuffle velociraptor cve; do
     user_name="mcp-${mcp_id}"
     id -u "$user_name" >/dev/null 2>&1 || continue
 

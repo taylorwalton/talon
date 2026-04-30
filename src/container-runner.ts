@@ -282,6 +282,7 @@ function buildVolumeMounts(
       dir: 'velociraptor-mcp',
       extraFiles: ['api.config.yaml'],
     },
+    { id: 'cve', dir: 'cve-mcp' },
   ];
   for (const mcp of ISOLATED_MCPS) {
     const mcpMount = mounts.find(

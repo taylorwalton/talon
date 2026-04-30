@@ -26,6 +26,9 @@
     },
     "shuffle": {
       "command": "/workspace/extra/shuffle-mcp/shuffle-mcp.sh"
+    },
+    "cve": {
+      "command": "/workspace/extra/cve-mcp/cve-mcp.sh"
     }
   }
 }

@@ -230,6 +230,11 @@ export class HttpChannel implements Channel {
             containerPath: 'shuffle-mcp',
             readonly: true,
           },
+          {
+            hostPath: path.join(process.cwd(), 'cve-mcp'),
+            containerPath: 'cve-mcp',
+            readonly: true,
+          },
         ],
       },
     };
