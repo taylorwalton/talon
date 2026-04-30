@@ -313,13 +313,15 @@ async function buildContainerArgs(
         args.push('-e', 'HOME=/home/node');
       }
     } else {
-      // Non-main containers MUST NOT run as root — claude-code refuses to start
-      // as root even with --dangerously-skip-permissions. Always use the
-      // container's built-in 'node' user (uid 1000) as the minimum.
-      // When host runs as a regular user, match that uid instead for file access.
-      const containerUid = hostUid !== 0 ? hostUid : 1000;
-      const containerGid = hostGid != null && hostGid !== 0 ? hostGid : 1000;
-      args.push('--user', `${containerUid}:${containerGid}`);
+      // Non-main containers START as root so entrypoint.sh can:
+      //   - copy per-MCP .env files to /etc/mcp-secrets/ with restricted perms
+      //   - shadow original bind-mounts so the agent can't read them
+      // Then setpriv drops to RUN_UID before exec'ing claude-code (which
+      // refuses to run as root). Must NOT pass --user here.
+      const targetUid = hostUid !== 0 ? hostUid : 1000;
+      const targetGid = hostGid != null && hostGid !== 0 ? hostGid : 1000;
+      args.push('-e', `RUN_UID=${targetUid}`);
+      args.push('-e', `RUN_GID=${targetGid}`);
       args.push('-e', 'HOME=/home/node');
     }
   }
