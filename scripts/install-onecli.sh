@@ -168,31 +168,35 @@ echo
 
 if [ "$AUTH_STATUS" = "awaiting API key" ]; then
   cat <<EOF
-NEXT STEP — bootstrap your OneCLI API key:
+NEXT STEP — get your OneCLI agent access token.
 
-  1. Open the OneCLI dashboard. Three options:
+OneCLI default mode is single-user, no signup required. Open the dashboard,
+create an agent, and copy its access token.
 
-     a) From this server with port forwarding (recommended):
-          ssh -L 10254:127.0.0.1:10254 root@<this-host>
-        then open: http://localhost:10254
+  1. OPEN THE DASHBOARD:
 
-     b) Direct from another machine on the same network:
-          http://$(echo "$ONECLI_URL" | sed -E 's#https?://##')
+     a) SSH tunnel from your laptop (recommended for headless servers):
+          ssh -L 10254:$(echo "$ONECLI_URL" | sed -E 's#https?://##') root@<this-host>
+        then open in your browser: http://localhost:10254
 
-     c) Via curl on this server (headless):
-          curl -s $ONECLI_URL/api/auth/signup -X POST \\
-            -H 'Content-Type: application/json' \\
-            -d '{"email":"you@example.com","password":"strong-password"}'
+     b) Expose to LAN by rebinding ports to 0.0.0.0:
+          sudo sed -i 's/172.17.0.1:/0.0.0.0:/g' /root/.onecli/docker-compose.yml
+          docker compose -p onecli -f /root/.onecli/docker-compose.yml up -d
+        then open: http://<this-host-ip>:10254
 
-  2. Sign up / log in, then go to Settings → API Keys.
+  2. CREATE AN AGENT in the dashboard (or via CLI once authed):
+       Name: nanoclaw            (or per-group: 'main', 'copilot', etc.)
+       Identifier: nanoclaw      (lowercase, hyphens — must match group folder)
 
-  3. Copy your API key (starts with 'oc_').
+  3. COPY THE AGENT ACCESS TOKEN (starts with 'oc_agent_').
 
-  4. Re-run this script with the key (it will finish auth + persist to .env):
+  4. RE-RUN THIS SCRIPT with the token:
 
-       ONECLI_API_KEY=oc_xxxxx bash scripts/install-onecli.sh
+       ONECLI_API_KEY=oc_agent_xxxxx bash scripts/install-onecli.sh
 
-  Or set ONECLI_API_KEY in $ENV_FILE and re-run.
+     Or add ONECLI_API_KEY to $ENV_FILE manually and re-run.
+
+  REFERENCE: https://www.onecli.sh/docs/guides/nanoclaw
 
 EOF
   exit 0
