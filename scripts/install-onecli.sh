@@ -1,11 +1,18 @@
 #!/usr/bin/env bash
 # Install and configure OneCLI for NanoClaw.
 #
-# Idempotent: safe to re-run. Skips work that's already done.
-# Non-destructive: never overwrites existing config without backup.
+# Idempotent: safe to re-run. Detects existing install and skips work.
+# Non-destructive: never overwrites existing .env values without warning.
+#
+# Phases:
+#   1. Install OneCLI gateway + CLI binary if missing
+#   2. Detect the reachable gateway URL (loopback or Docker bridge)
+#   3. Persist ONECLI_URL in .env
+#   4. If ONECLI_API_KEY available (env or .env), run `onecli auth login`
+#   5. If no API key, print bootstrap instructions and exit cleanly
 #
 # Exit codes:
-#   0 = OneCLI installed, gateway healthy, .env configured
+#   0 = OneCLI installed; auth complete OR awaiting manual API key step
 #   1 = install failed (network, missing curl, etc.)
 #   2 = gateway did not become healthy after install
 #   3 = required prerequisite missing (curl, write access)
@@ -13,9 +20,8 @@
 set -euo pipefail
 
 ONECLI_PORT="${ONECLI_PORT:-10254}"
-ONECLI_URL="http://127.0.0.1:${ONECLI_PORT}"
+HEALTH_TIMEOUT="${HEALTH_TIMEOUT:-30}"
 ENV_FILE="${ENV_FILE:-$(pwd)/.env}"
-HEALTH_TIMEOUT="${HEALTH_TIMEOUT:-15}"
 
 log()  { printf '[install-onecli] %s\n' "$*"; }
 warn() { printf '[install-onecli] WARN: %s\n' "$*" >&2; }
@@ -26,75 +32,90 @@ fail() { printf '[install-onecli] FAIL: %s\n' "$*" >&2; exit "${2:-1}"; }
 command -v curl >/dev/null || fail "curl not in PATH — install curl first" 3
 command -v sh   >/dev/null || fail "sh not in PATH"                        3
 
-# Add ~/.local/bin to PATH for the rest of this script (OneCLI installs there)
+# Add ~/.local/bin to PATH for the rest of this script (CLI installs there on some systems)
 export PATH="$HOME/.local/bin:$PATH"
 
 # --- Phase 1: install gateway + CLI if missing ---
 
-if command -v onecli >/dev/null && curl -sf "$ONECLI_URL/health" >/dev/null 2>&1; then
-  log "OneCLI already installed and gateway healthy at $ONECLI_URL"
+ALREADY_INSTALLED=0
+if command -v onecli >/dev/null 2>&1; then
+  log "OneCLI binary present: $(command -v onecli)"
   ALREADY_INSTALLED=1
 else
-  ALREADY_INSTALLED=0
+  log "installing OneCLI gateway..."
+  curl -fsSL onecli.sh/install | sh || fail "gateway install failed" 1
 
-  if ! command -v onecli >/dev/null; then
-    log "installing OneCLI gateway..."
-    curl -fsSL onecli.sh/install | sh || fail "gateway install failed" 1
+  log "installing OneCLI CLI..."
+  curl -fsSL onecli.sh/cli/install | sh || fail "CLI install failed" 1
 
-    log "installing OneCLI CLI..."
-    curl -fsSL onecli.sh/cli/install | sh || fail "CLI install failed" 1
-  else
-    log "OneCLI binaries present but gateway not responding — attempting start"
-    onecli start >/dev/null 2>&1 || true
-  fi
-
-  # Re-export PATH in case installer just dropped binaries into ~/.local/bin
+  # Re-export PATH in case installer just dropped binary in ~/.local/bin
   export PATH="$HOME/.local/bin:$PATH"
-  command -v onecli >/dev/null || fail "onecli still not in PATH after install — check installer output" 1
+  command -v onecli >/dev/null 2>&1 || fail "onecli still not in PATH after install" 1
 fi
 
-# --- Phase 2: persist ~/.local/bin in shell rc files ---
+# --- Phase 2: persist ~/.local/bin in shell rc files (only if CLI lives there) ---
 
-for rc in "$HOME/.bashrc" "$HOME/.zshrc"; do
-  [ -f "$rc" ] || continue
-  if ! grep -q '\.local/bin' "$rc" 2>/dev/null; then
-    log "adding ~/.local/bin to PATH in $rc"
-    printf '\n# Added by nanoclaw install-onecli.sh\nexport PATH="$HOME/.local/bin:$PATH"\n' >> "$rc"
-  fi
-done
+if [ -x "$HOME/.local/bin/onecli" ]; then
+  for rc in "$HOME/.bashrc" "$HOME/.zshrc"; do
+    [ -f "$rc" ] || continue
+    if ! grep -q '\.local/bin' "$rc" 2>/dev/null; then
+      log "adding ~/.local/bin to PATH in $rc"
+      printf '\n# Added by nanoclaw install-onecli.sh\nexport PATH="$HOME/.local/bin:$PATH"\n' >> "$rc"
+    fi
+  done
+fi
 
-# --- Phase 3: point CLI at local gateway ---
+# --- Phase 3: detect reachable gateway URL ---
 
-log "configuring CLI: api-host = $ONECLI_URL"
-onecli config set api-host "$ONECLI_URL" >/dev/null
+# Build candidate list. Docker-bridge IP first when present (new containerized
+# OneCLI binds to docker0 by default on Linux).
+CANDIDATES=()
+if [ -d /sys/class/net/docker0 ]; then
+  BRIDGE_IP=$(ip -4 addr show docker0 2>/dev/null | awk '/inet /{print $2}' | cut -d/ -f1 | head -1)
+  [ -n "${BRIDGE_IP:-}" ] && CANDIDATES+=("http://${BRIDGE_IP}:${ONECLI_PORT}")
+fi
+CANDIDATES+=("http://127.0.0.1:${ONECLI_PORT}")
+CANDIDATES+=("http://localhost:${ONECLI_PORT}")
 
-# --- Phase 4: wait for gateway health ---
+probe_health() {
+  curl -sf -m 2 "${1}/health" >/dev/null 2>&1
+}
 
-log "waiting up to ${HEALTH_TIMEOUT}s for gateway health..."
-i=0
-while [ "$i" -lt "$HEALTH_TIMEOUT" ]; do
-  if curl -sf "$ONECLI_URL/health" >/dev/null 2>&1; then
-    log "gateway healthy at $ONECLI_URL"
-    break
-  fi
-  i=$((i + 1))
+log "probing gateway candidates: ${CANDIDATES[*]}"
+ONECLI_URL=""
+for i in $(seq 1 "$HEALTH_TIMEOUT"); do
+  for u in "${CANDIDATES[@]}"; do
+    if probe_health "$u"; then
+      ONECLI_URL="$u"
+      break 2
+    fi
+  done
   sleep 1
 done
 
-if ! curl -sf "$ONECLI_URL/health" >/dev/null 2>&1; then
-  warn "gateway not responding at $ONECLI_URL after ${HEALTH_TIMEOUT}s"
+if [ -z "$ONECLI_URL" ]; then
+  warn "no reachable gateway found on any of: ${CANDIDATES[*]}"
+  warn "check: docker ps | grep onecli"
   warn "check: ps aux | grep -i onecli | grep -v grep"
-  warn "try:   onecli start"
   exit 2
 fi
 
-# --- Phase 5: ensure ONECLI_URL in .env ---
+log "gateway healthy at $ONECLI_URL"
+
+# --- Phase 4: configure CLI to point at this URL ---
+
+log "configuring CLI: api-host = $ONECLI_URL"
+onecli config set api-host "$ONECLI_URL" >/dev/null 2>&1 || \
+  warn "onecli config set api-host failed (may not be needed in this CLI version)"
+
+# --- Phase 5: persist ONECLI_URL in .env ---
 
 if [ -f "$ENV_FILE" ]; then
   if grep -qE '^ONECLI_URL=' "$ENV_FILE"; then
     CURRENT=$(grep -E '^ONECLI_URL=' "$ENV_FILE" | head -1 | cut -d= -f2- | tr -d '"' | tr -d "'")
     if [ "$CURRENT" != "$ONECLI_URL" ]; then
-      warn "ONECLI_URL in $ENV_FILE is '$CURRENT' (expected '$ONECLI_URL') — leaving as-is"
+      warn "ONECLI_URL in $ENV_FILE is '$CURRENT' (detected '$ONECLI_URL') — leaving as-is"
+      warn "to switch, edit $ENV_FILE manually"
     else
       log "ONECLI_URL already set in $ENV_FILE"
     fi
@@ -106,20 +127,83 @@ else
   warn "$ENV_FILE not found — skipping .env update (run from your nanoclaw install dir)"
 fi
 
-# --- Phase 6: report ---
+# --- Phase 6: API key bootstrap ---
+
+# Try env var first, then .env
+ONECLI_API_KEY="${ONECLI_API_KEY:-}"
+if [ -z "$ONECLI_API_KEY" ] && [ -f "$ENV_FILE" ]; then
+  ONECLI_API_KEY=$(grep -E '^ONECLI_API_KEY=' "$ENV_FILE" 2>/dev/null | head -1 | cut -d= -f2- | tr -d '"' | tr -d "'" || true)
+fi
+
+if [ -n "$ONECLI_API_KEY" ]; then
+  log "API key present — running auth login"
+  if onecli auth login --api-key "$ONECLI_API_KEY" >/dev/null 2>&1; then
+    log "auth login succeeded"
+  else
+    warn "auth login failed — check key or try manually: onecli auth login --api-key <key>"
+  fi
+
+  # Persist to .env if not already there
+  if [ -f "$ENV_FILE" ] && ! grep -qE '^ONECLI_API_KEY=' "$ENV_FILE"; then
+    log "appending ONECLI_API_KEY to $ENV_FILE"
+    printf 'ONECLI_API_KEY=%s\n' "$ONECLI_API_KEY" >> "$ENV_FILE"
+  fi
+
+  AUTH_STATUS="configured"
+else
+  AUTH_STATUS="awaiting API key"
+fi
+
+# --- Phase 7: report ---
 
 echo
 log "DONE."
-log "  Version:        $(onecli version 2>/dev/null | head -1 || echo unknown)"
 log "  Gateway:        $ONECLI_URL (healthy)"
-log "  CLI api-host:   $(onecli config get api-host 2>/dev/null || echo '?')"
-log "  Secrets count:  $(onecli secrets list --quiet --fields name 2>/dev/null | wc -l | tr -d ' ')"
+log "  CLI version:    $(onecli version 2>/dev/null | grep -oE '"version"[^,]*' | head -1 | tr -d '"' | sed 's/version://;s/[ ]//g' || echo unknown)"
 log "  Already done:   $([ "$ALREADY_INSTALLED" -eq 1 ] && echo yes || echo no)"
+log "  Auth status:    $AUTH_STATUS"
 echo
-log "NEXT:"
-log "  Register the Anthropic credential next:"
-log "    bash scripts/migrate-anthropic-to-vault.sh"
-log "  Or manually:"
-log "    onecli secrets create --name Anthropic --type anthropic \\"
-log "      --value <your-token> --host-pattern api.anthropic.com"
-echo
+
+if [ "$AUTH_STATUS" = "awaiting API key" ]; then
+  cat <<EOF
+NEXT STEP — bootstrap your OneCLI API key:
+
+  1. Open the OneCLI dashboard. Three options:
+
+     a) From this server with port forwarding (recommended):
+          ssh -L 10254:127.0.0.1:10254 root@<this-host>
+        then open: http://localhost:10254
+
+     b) Direct from another machine on the same network:
+          http://$(echo "$ONECLI_URL" | sed -E 's#https?://##')
+
+     c) Via curl on this server (headless):
+          curl -s $ONECLI_URL/api/auth/signup -X POST \\
+            -H 'Content-Type: application/json' \\
+            -d '{"email":"you@example.com","password":"strong-password"}'
+
+  2. Sign up / log in, then go to Settings → API Keys.
+
+  3. Copy your API key (starts with 'oc_').
+
+  4. Re-run this script with the key (it will finish auth + persist to .env):
+
+       ONECLI_API_KEY=oc_xxxxx bash scripts/install-onecli.sh
+
+  Or set ONECLI_API_KEY in $ENV_FILE and re-run.
+
+EOF
+  exit 0
+fi
+
+cat <<EOF
+NEXT STEP — register your Anthropic credential:
+
+  Run the next script:
+    bash scripts/migrate-anthropic-to-vault.sh
+
+  Or manually:
+    onecli secrets create --name Anthropic --type anthropic \\
+      --value <your-token> --host-pattern api.anthropic.com
+
+EOF
