@@ -129,31 +129,127 @@ else
   warn "$ENV_FILE not found — skipping .env update (run from your nanoclaw install dir)"
 fi
 
-# --- Phase 6: API key bootstrap ---
+# --- Phase 6: ensure per-group agents exist ---
+#
+# Each NanoClaw group needs its own OneCLI agent identity (per the
+# docs: https://www.onecli.sh/docs/guides/nanoclaw). The 'main' group
+# uses OneCLI's default agent and does not need an explicit agent.
+#
+# Detects groups from the groups/ directory and creates a OneCLI agent
+# for each one whose identifier is missing. Idempotent.
 
-# Try env var first, then .env
+GROUPS_DIR="${GROUPS_DIR:-$(pwd)/groups}"
+DETECTED_GROUPS=()
+if [ -d "$GROUPS_DIR" ]; then
+  while IFS= read -r g; do
+    base=$(basename "$g")
+    case "$base" in
+      .*|main) continue ;;  # skip hidden + main (uses default agent)
+      *) DETECTED_GROUPS+=("$base") ;;
+    esac
+  done < <(find "$GROUPS_DIR" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | sort)
+fi
+
+# Allow override via AGENTS env var (comma-separated identifiers)
+if [ -n "${AGENTS:-}" ]; then
+  IFS=',' read -ra DETECTED_GROUPS <<< "$AGENTS"
+fi
+
+# Default: at least create 'copilot' if no groups detected (covers fresh installs)
+if [ "${#DETECTED_GROUPS[@]}" -eq 0 ]; then
+  log "no groups detected in $GROUPS_DIR — defaulting to 'copilot'"
+  DETECTED_GROUPS=("copilot")
+fi
+
+log "ensuring OneCLI agents for groups: ${DETECTED_GROUPS[*]}"
+
+# Helper: get JSON via HTTP API (no auth needed in single-user mode)
+api_get() {
+  curl -sf -m 5 "${ONECLI_URL}$1" 2>/dev/null
+}
+api_post() {
+  curl -sf -m 5 -X POST -H 'Content-Type: application/json' \
+    -d "$2" "${ONECLI_URL}$1" 2>/dev/null
+}
+
+# Helper: extract a JSON field for an agent by identifier (uses python3)
+agent_field() {
+  local list_json=$1 identifier=$2 field=$3
+  printf '%s' "$list_json" | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+if isinstance(data, dict): data = data.get('data', [])
+for a in data:
+  if a.get('identifier') == '$identifier':
+    print(a.get('$field', ''))
+    break
+" 2>/dev/null
+}
+
+command -v python3 >/dev/null || fail "python3 required for agent JSON parsing — apt install python3" 3
+
+AGENTS_JSON=$(api_get /api/agents) || fail "could not list agents from $ONECLI_URL/api/agents" 1
+
+PRIMARY_TOKEN=""
+for ident in "${DETECTED_GROUPS[@]}"; do
+  EXISTING_TOKEN=$(agent_field "$AGENTS_JSON" "$ident" accessToken)
+  if [ -n "$EXISTING_TOKEN" ]; then
+    log "agent '$ident' already exists"
+  else
+    # Build a CamelCase display name from identifier
+    DISPLAY_NAME=$(printf '%s' "$ident" | sed -E 's/(^|-)([a-z])/\U\2/g')
+    log "creating agent '$ident' (display: $DISPLAY_NAME)"
+    if api_post /api/agents "{\"name\":\"$DISPLAY_NAME\",\"identifier\":\"$ident\"}" >/dev/null; then
+      AGENTS_JSON=$(api_get /api/agents)
+      EXISTING_TOKEN=$(agent_field "$AGENTS_JSON" "$ident" accessToken)
+    else
+      warn "failed to create agent '$ident' — skipping"
+      continue
+    fi
+  fi
+  # Capture first valid token as the SDK's primary token
+  if [ -z "$PRIMARY_TOKEN" ] && [ -n "$EXISTING_TOKEN" ]; then
+    PRIMARY_TOKEN="$EXISTING_TOKEN"
+    PRIMARY_AGENT="$ident"
+  fi
+done
+
+# --- Phase 7: API key persistence + auth login ---
+
+# Prefer explicit env override, then existing .env, then primary agent token
 ONECLI_API_KEY="${ONECLI_API_KEY:-}"
 if [ -z "$ONECLI_API_KEY" ] && [ -f "$ENV_FILE" ]; then
   ONECLI_API_KEY=$(grep -E '^ONECLI_API_KEY=' "$ENV_FILE" 2>/dev/null | head -1 | cut -d= -f2- | tr -d '"' | tr -d "'" || true)
 fi
+if [ -z "$ONECLI_API_KEY" ] && [ -n "$PRIMARY_TOKEN" ]; then
+  log "using agent '$PRIMARY_AGENT' access token as ONECLI_API_KEY"
+  ONECLI_API_KEY="$PRIMARY_TOKEN"
+fi
 
 if [ -n "$ONECLI_API_KEY" ]; then
-  log "API key present — running auth login"
   if onecli auth login --api-key "$ONECLI_API_KEY" >/dev/null 2>&1; then
-    log "auth login succeeded"
+    log "CLI auth login succeeded"
   else
-    warn "auth login failed — check key or try manually: onecli auth login --api-key <key>"
+    warn "auth login failed — single-user mode may not require it; continuing"
   fi
 
-  # Persist to .env if not already there
-  if [ -f "$ENV_FILE" ] && ! grep -qE '^ONECLI_API_KEY=' "$ENV_FILE"; then
-    log "appending ONECLI_API_KEY to $ENV_FILE"
-    printf 'ONECLI_API_KEY=%s\n' "$ONECLI_API_KEY" >> "$ENV_FILE"
+  if [ -f "$ENV_FILE" ]; then
+    if grep -qE '^ONECLI_API_KEY=' "$ENV_FILE"; then
+      CURRENT_KEY=$(grep -E '^ONECLI_API_KEY=' "$ENV_FILE" | head -1 | cut -d= -f2- | tr -d '"' | tr -d "'")
+      if [ "$CURRENT_KEY" != "$ONECLI_API_KEY" ]; then
+        warn "ONECLI_API_KEY in $ENV_FILE differs from current — leaving as-is"
+      else
+        log "ONECLI_API_KEY already set in $ENV_FILE"
+      fi
+    else
+      log "appending ONECLI_API_KEY to $ENV_FILE"
+      printf 'ONECLI_API_KEY=%s\n' "$ONECLI_API_KEY" >> "$ENV_FILE"
+    fi
   fi
 
   AUTH_STATUS="configured"
 else
-  AUTH_STATUS="awaiting API key"
+  AUTH_STATUS="no agents created — manual setup needed"
 fi
 
 # --- Phase 7: report ---
@@ -164,37 +260,24 @@ log "  Gateway:        $ONECLI_URL (healthy)"
 log "  CLI version:    $(onecli version 2>/dev/null | grep -oE '"version"[^,]*' | head -1 | tr -d '"' | sed 's/version://;s/[ ]//g' || echo unknown)"
 log "  Already done:   $([ "$ALREADY_INSTALLED" -eq 1 ] && echo yes || echo no)"
 log "  Auth status:    $AUTH_STATUS"
+log "  Agents:         ${DETECTED_GROUPS[*]:-(none)}"
 echo
 
-if [ "$AUTH_STATUS" = "awaiting API key" ]; then
+if [ "$AUTH_STATUS" = "no agents created — manual setup needed" ]; then
   cat <<EOF
-NEXT STEP — get your OneCLI agent access token.
+NEXT STEP — manual agent creation needed.
 
-OneCLI default mode is single-user, no signup required. Open the dashboard,
-create an agent, and copy its access token.
+The script could not auto-create any agents. This usually means OneCLI
+is in multi-user mode (NEXTAUTH_SECRET is set) and requires browser
+signup before the API can be used.
 
-  1. OPEN THE DASHBOARD:
+  1. Open the dashboard:
+       ssh -L 10254:$(echo "$ONECLI_URL" | sed -E 's#https?://##') root@<this-host>
+       then open: http://localhost:10254
 
-     a) SSH tunnel from your laptop (recommended for headless servers):
-          ssh -L 10254:$(echo "$ONECLI_URL" | sed -E 's#https?://##') root@<this-host>
-        then open in your browser: http://localhost:10254
-
-     b) Expose to LAN by rebinding ports to 0.0.0.0:
-          sudo sed -i 's/172.17.0.1:/0.0.0.0:/g' /root/.onecli/docker-compose.yml
-          docker compose -p onecli -f /root/.onecli/docker-compose.yml up -d
-        then open: http://<this-host-ip>:10254
-
-  2. CREATE AN AGENT in the dashboard (or via CLI once authed):
-       Name: nanoclaw            (or per-group: 'main', 'copilot', etc.)
-       Identifier: nanoclaw      (lowercase, hyphens — must match group folder)
-
-  3. COPY THE AGENT ACCESS TOKEN (starts with 'oc_agent_').
-
-  4. RE-RUN THIS SCRIPT with the token:
-
-       ONECLI_API_KEY=oc_agent_xxxxx bash scripts/install-onecli.sh
-
-     Or add ONECLI_API_KEY to $ENV_FILE manually and re-run.
+  2. Sign in (Google OAuth if configured) and create an agent.
+  3. Copy the agent access token and re-run:
+       ONECLI_API_KEY=<token> bash scripts/install-onecli.sh
 
   REFERENCE: https://www.onecli.sh/docs/guides/nanoclaw
 
