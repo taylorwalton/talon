@@ -24,26 +24,37 @@ if [ "$(id -u)" = "0" ] && [ -f /workspace/project/.env ]; then
 fi
 
 # --- Per-MCP credential isolation ---
-# Container-runner mounts the original .env to two paths via docker -v:
+# Container-runner mounts each MCP's secret file(s) to two paths via docker -v:
 #
-#   /etc/mcp-staging/<mcp>.env  (root-readable copy, parent dir mode 700)
-#   /workspace/extra/<mcp>/.env (shadowed by /dev/null — agent sees empty)
+#   /etc/mcp-staging/<id>.<file>  (root-readable copy, parent dir mode 700)
+#   /workspace/extra/<dir>/<file> (shadowed by /dev/null — agent sees empty)
 #
-# We consume the staging copy here, copy it to /etc/mcp-secrets/<mcp>.env,
+# We consume the staging copies here, copy each one to /etc/mcp-secrets/<id>.<file>,
 # then chown to the MCP-specific uid and chmod 600. Wrappers in
-# /workspace/extra/<mcp>/ use `sudo -u mcp-<mcp>` to read it at MCP-launch
-# time. Sudoers config in /etc/sudoers.d/mcp-isolation grants node
-# passwordless access to those uids.
+# /workspace/extra/<dir>/ use `sudo -u mcp-<id>` to read at MCP-launch time.
+# Sudoers config in /etc/sudoers.d/mcp-isolation grants node passwordless
+# access to those uids.
+#
+# Each entry below is "id" — the directory and any non-.env extra files
+# are configured in src/container-runner.ts (ISOLATED_MCPS) and we just
+# pick up whatever the staging dir has. Extra-file naming convention:
+# /etc/mcp-staging/<id>.<filename> (e.g. velociraptor.api.config.yaml).
 if [ "$(id -u)" = "0" ] && [ -d /etc/mcp-secrets ] && [ -d /etc/mcp-staging ]; then
-  for mcp_dir in siem; do
-    staging="/etc/mcp-staging/${mcp_dir}.env"
-    dst="/etc/mcp-secrets/${mcp_dir}.env"
-    user_name="mcp-${mcp_dir}"
-    if [ -f "$staging" ] && id -u "$user_name" >/dev/null 2>&1; then
+  for mcp_id in siem mysql wazuh copilot shuffle velociraptor; do
+    user_name="mcp-${mcp_id}"
+    id -u "$user_name" >/dev/null 2>&1 || continue
+
+    # Process every staging file matching <id>.* — covers .env and any
+    # extra credential files (e.g. velociraptor.api.config.yaml).
+    # Use [ -e ] to guard against the literal pattern when glob has no match.
+    for staging in /etc/mcp-staging/"${mcp_id}".*; do
+      [ -e "$staging" ] || continue
+      basename=$(basename "$staging")
+      dst="/etc/mcp-secrets/${basename}"
       cp "$staging" "$dst"
       chown "${user_name}:${user_name}" "$dst"
       chmod 600 "$dst"
-    fi
+    done
   done
 fi
 

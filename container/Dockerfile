@@ -89,9 +89,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends sudo \
     && rm -rf /var/lib/apt/lists/* \
     # Per-MCP non-privileged users (no shell, no home, no login)
     && useradd -r -u 2001 -s /usr/sbin/nologin mcp-siem \
+    && useradd -r -u 2002 -s /usr/sbin/nologin mcp-mysql \
+    && useradd -r -u 2003 -s /usr/sbin/nologin mcp-wazuh \
+    && useradd -r -u 2004 -s /usr/sbin/nologin mcp-copilot \
+    && useradd -r -u 2005 -s /usr/sbin/nologin mcp-shuffle \
+    && useradd -r -u 2006 -s /usr/sbin/nologin mcp-velociraptor \
     # node may sudo to any mcp-* user without password
     && mkdir -p /etc/sudoers.d \
-    && echo 'node ALL=(mcp-siem) NOPASSWD: ALL' > /etc/sudoers.d/mcp-isolation \
+    && echo 'node ALL=(mcp-siem,mcp-mysql,mcp-wazuh,mcp-copilot,mcp-shuffle,mcp-velociraptor) NOPASSWD: ALL' > /etc/sudoers.d/mcp-isolation \
     && chmod 0440 /etc/sudoers.d/mcp-isolation \
     # Per-MCP secrets directory: traversable but not listable
     && mkdir -p /etc/mcp-secrets \

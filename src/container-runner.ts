@@ -249,37 +249,83 @@ function buildVolumeMounts(
   }
 
   // --- Per-MCP credential isolation shadows ---
-  // For each MCP that has a dedicated mcp-* uid in the container, add two
+  // For each MCP that has a dedicated mcp-* uid in the container, add
   // host-side bind mounts AFTER the directory mount so they take precedence:
   //
-  //   1. /dev/null over /workspace/extra/<mcp>/.env so the agent (node uid)
+  //   1. /dev/null over /workspace/extra/<dir>/<file> so the agent (node uid)
   //      can't read the original cred file.
-  //   2. The host .env into /etc/mcp-staging/<mcp>.env so the entrypoint
-  //      (running as root) can copy it to /etc/mcp-secrets/<mcp>.env with
-  //      ownership chowned to mcp-<mcp> and mode 600. /etc/mcp-staging is
+  //   2. The host file into /etc/mcp-staging/<id>.<file> so the entrypoint
+  //      (running as root) can copy it to /etc/mcp-secrets/<id>.<file> with
+  //      ownership chowned to mcp-<id> and mode 600. /etc/mcp-staging is
   //      mode 700 root, unreadable by node.
   //
   // The mount --bind /dev/null trick from inside the container fails on
   // read-only mounts ("mount point is not a directory"), so we do this at
   // docker run time instead.
-  const ISOLATED_MCPS = ['siem'];
-  for (const mcpDir of ISOLATED_MCPS) {
+  //
+  // `id` is the short identifier used for mcp-<id> uid + sudoers + secret
+  // file naming. `dir` is the directory under /workspace/extra/ (often
+  // suffixed with -mcp). `extraFiles` lists additional credential files
+  // beyond .env (e.g. velociraptor's mTLS api.config.yaml).
+  const ISOLATED_MCPS: Array<{
+    id: string;
+    dir: string;
+    extraFiles?: string[];
+  }> = [
+    { id: 'siem', dir: 'siem' },
+    { id: 'mysql', dir: 'mysql' },
+    { id: 'wazuh', dir: 'wazuh-mcp' },
+    { id: 'copilot', dir: 'copilot-mcp' },
+    { id: 'shuffle', dir: 'shuffle-mcp' },
+    {
+      id: 'velociraptor',
+      dir: 'velociraptor-mcp',
+      extraFiles: ['api.config.yaml'],
+    },
+  ];
+  for (const mcp of ISOLATED_MCPS) {
     const mcpMount = mounts.find(
-      (m) => m.containerPath === `/workspace/extra/${mcpDir}`,
+      (m) => m.containerPath === `/workspace/extra/${mcp.dir}`,
     );
     if (!mcpMount) continue;
+
+    const fileMounts: Array<{ host: string; staging: string; visible: string }> =
+      [];
+
+    // Primary .env (always)
     const hostEnvPath = path.join(mcpMount.hostPath, '.env');
-    if (!fs.existsSync(hostEnvPath)) continue;
-    mounts.push({
-      hostPath: '/dev/null',
-      containerPath: `/workspace/extra/${mcpDir}/.env`,
-      readonly: true,
-    });
-    mounts.push({
-      hostPath: hostEnvPath,
-      containerPath: `/etc/mcp-staging/${mcpDir}.env`,
-      readonly: true,
-    });
+    if (fs.existsSync(hostEnvPath)) {
+      fileMounts.push({
+        host: hostEnvPath,
+        staging: `/etc/mcp-staging/${mcp.id}.env`,
+        visible: `/workspace/extra/${mcp.dir}/.env`,
+      });
+    }
+
+    // Extra credential files (e.g. mTLS cert)
+    for (const extra of mcp.extraFiles ?? []) {
+      const hostExtraPath = path.join(mcpMount.hostPath, extra);
+      if (fs.existsSync(hostExtraPath)) {
+        fileMounts.push({
+          host: hostExtraPath,
+          staging: `/etc/mcp-staging/${mcp.id}.${extra}`,
+          visible: `/workspace/extra/${mcp.dir}/${extra}`,
+        });
+      }
+    }
+
+    for (const fm of fileMounts) {
+      mounts.push({
+        hostPath: '/dev/null',
+        containerPath: fm.visible,
+        readonly: true,
+      });
+      mounts.push({
+        hostPath: fm.host,
+        containerPath: fm.staging,
+        readonly: true,
+      });
+    }
   }
 
   return mounts;
