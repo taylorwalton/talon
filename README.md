@@ -113,7 +113,7 @@ See [docs/ANON_PROXY.md](docs/ANON_PROXY.md) for a full walkthrough of the proxy
 
 If [Ollama](https://ollama.com) is running on the same host, Talon automatically routes raw event interpretation through a local model rather than the cloud. This keeps the most sensitive step — reading the full raw event and extracting IOCs — entirely on-premises.
 
-The agent checks for Ollama at startup. If it's not running, the investigation continues without it — no errors, no configuration required. See step 8 of the deployment guide below for setup.
+The agent checks for Ollama at startup. If it's not running, the investigation continues without it — no errors, no configuration required. See step 12 of the deployment guide below for setup.
 
 ---
 
@@ -155,12 +155,56 @@ CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-...
 # Required: API key for all HTTP channel requests (except /health)
 HTTP_API_KEY=your-secret-key-here
 
-# Optional: restrict the credential proxy to loopback only (default: 0.0.0.0)
+# Optional: restrict the native credential-proxy fallback to loopback only
+# (only used when OneCLI is unavailable; default: 0.0.0.0)
 # CREDENTIAL_PROXY_HOST=127.0.0.1
 EOF
 ```
 
-### 4. Create the mount allowlist
+> **Note:** `CLAUDE_CODE_OAUTH_TOKEN` is required here so the OneCLI migration in step 5 can pick it up. After that step strips it from `.env`, the token lives only in the OneCLI Vault.
+
+### 4. Install OneCLI (recommended)
+
+Install the OneCLI gateway and bootstrap a per-group agent identity. OneCLI manages the Anthropic credential (and optionally other backend credentials) so they never enter agent containers — auth is injected at the network layer via an HTTPS proxy.
+
+```bash
+bash scripts/install-onecli.sh
+```
+
+What it does (idempotent — safe to re-run):
+
+- Installs the OneCLI Docker stack and CLI binary if missing
+- Probes the gateway URL (Docker bridge IP on Linux, loopback on macOS)
+- Detects groups under `groups/` and creates a OneCLI agent for each one (excluding `main`, which uses OneCLI's default agent)
+- Persists `ONECLI_URL` and `ONECLI_API_KEY` to `.env`
+
+If you skip this step, Talon falls back to injecting `CLAUDE_CODE_OAUTH_TOKEN` directly into the container as an env var. The fallback works in most cases, but in some environments the in-container Claude CLI requires a manual `claude /login` to bootstrap on first run. With OneCLI present, that manual step is never needed.
+
+### 5. Migrate the Anthropic credential to the OneCLI Vault
+
+After OneCLI is running, register your Claude OAuth token (or API key) in the Vault:
+
+```bash
+bash scripts/migrate-anthropic-to-vault.sh
+```
+
+This reads `CLAUDE_CODE_OAUTH_TOKEN` (or `ANTHROPIC_API_KEY`) from `.env` and registers it as an `anthropic` secret bound to `api.anthropic.com`. The raw token stays in `.env` for now so you can verify the Vault path works first.
+
+Restart Talon and confirm with:
+
+```bash
+sudo systemctl restart talon
+grep -E 'OneCLI gateway|Injecting' logs/talon.log | tail
+```
+
+You should see `OneCLI gateway config applied` and **not** `Injecting CLAUDE_CODE_OAUTH_TOKEN into container`. Once verified, strip the raw token from `.env`:
+
+```bash
+bash scripts/migrate-anthropic-to-vault.sh --strip-env
+sudo systemctl restart talon
+```
+
+### 6. Create the mount allowlist
 
 Controls which host directories can be mounted into agent containers. Lives outside the project root so agents cannot modify it.
 
@@ -191,7 +235,7 @@ EOF
 
 > **Order matters:** the `mempalace-data` entry must come before the project root entry — the security layer matches the first applicable root. If all MCP tools are unavailable after starting Talon, this file is the first thing to check.
 
-### 5. Configure SIEM credentials
+### 7. Configure SIEM credentials
 
 ```bash
 bash siem/setup.sh
@@ -200,14 +244,14 @@ bash siem/setup.sh
 
 The setup script creates the Python venv and installs `opensearch-mcp-server` into it. The `.env` file is created from the template automatically if it doesn't already exist.
 
-### 6. Configure MySQL credentials
+### 8. Configure MySQL credentials
 
 ```bash
 bash mysql/setup.sh
 # Edit mysql/.env — set MYSQL_HOST, MYSQL_PORT, MYSQL_USER, MYSQL_PASS, MYSQL_DB
 ```
 
-### 7. Configure CoPilot MCP credentials
+### 9. Configure CoPilot MCP credentials
 
 ```bash
 bash copilot-mcp/setup.sh
@@ -219,7 +263,7 @@ bash copilot-mcp/setup.sh
 > COPILOT_URL=http://host.docker.internal:5000
 > ```
 
-### 8. Configure Wazuh MCP credentials
+### 10. Configure Wazuh MCP credentials
 
 ```bash
 bash wazuh-mcp/setup.sh
@@ -234,7 +278,7 @@ The Wazuh MCP server gives the agent direct access to the Wazuh manager API — 
 > ```
 > Set `WAZUH_PROD_SSL_VERIFY=false` if the manager uses a self-signed certificate.
 
-### 9. Configure Velociraptor MCP credentials
+### 11. Configure Velociraptor MCP credentials
 
 ```bash
 bash velociraptor-mcp/setup.sh
@@ -253,7 +297,7 @@ The Velociraptor MCP server gives the agent direct DFIR capability — querying 
 
 > **Note:** Set `VELOCIRAPTOR_SSL_VERIFY=false` in `velociraptor-mcp/.env` if your Velociraptor server uses a self-signed certificate.
 
-### 10. Configure local LLM analysis (optional)
+### 12. Configure local LLM analysis (optional)
 
 Talon can route raw SIEM event analysis through an open-source LLM instead of the Claude cloud model. Combined with the anonymizing proxy — which replaces PII with session tokens before any LLM call — this keeps sensitive data interpretation off Anthropic's API entirely.
 
@@ -316,7 +360,7 @@ cp ollama/.env.example ollama/.env
 
 ---
 
-### 11. Set up MemPalace persistent memory
+### 13. Set up MemPalace persistent memory
 
 MemPalace gives the SOC agent long-term memory — past investigation outcomes, asset metadata, confirmed false positives, and IOC history are stored in a local ChromaDB + SQLite knowledge graph and retrieved automatically at the start of each investigation.
 
@@ -332,15 +376,15 @@ apt install -y build-essential g++ python3-dev
 
 This creates the local venv and the `mempalace-data/` directory where the palace is stored. The palace initialises automatically on first agent run — no separate init step is needed.
 
-> **Note:** `mempalace-data/` is gitignored and persists across container restarts. The writable mount entry added in Step 4 is what allows the agent to write to it. Back up `mempalace-data/` alongside your other `.env` files.
+> **Note:** `mempalace-data/` is gitignored and persists across container restarts. The writable mount entry added in Step 6 is what allows the agent to write to it. Back up `mempalace-data/` alongside your other `.env` files.
 
-### 12. Build the container
+### 14. Build the container
 
 ```bash
 CONTAINER_RUNTIME=docker ./container/build.sh
 ```
 
-### 13. Start the service
+### 15. Start the service
 
 **macOS:**
 ```bash
@@ -406,7 +450,7 @@ systemctl --user enable --now talon
 loginctl enable-linger
 ```
 
-### 14. Verify
+### 16. Verify
 
 ```bash
 # /health is unauthenticated
