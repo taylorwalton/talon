@@ -107,6 +107,7 @@ except Exception:
 if [ -n "$EXISTING_ID" ]; then
   log "Vault secret '$SECRET_NAME' (anthropic) already exists — id=$EXISTING_ID"
   log "skipping create. To replace, delete first: onecli secrets delete --id $EXISTING_ID"
+  SECRET_ID="$EXISTING_ID"
 else
   log "registering '$SECRET_NAME' in Vault (type=anthropic, host=$HOST_PATTERN)"
   if onecli secrets create \
@@ -115,9 +116,79 @@ else
        --value "$TOKEN" \
        --host-pattern "$HOST_PATTERN" >/dev/null 2>&1; then
     log "secret registered successfully"
+    # Re-fetch to get the new ID
+    SECRET_ID=$(curl -sf -m 5 "${ONECLI_URL}/api/secrets" 2>/dev/null | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+if isinstance(data, dict): data = data.get('data', [])
+for s in data:
+  if s.get('name') == '$SECRET_NAME' and s.get('type') == 'anthropic':
+    print(s.get('id', ''))
+    break
+" 2>/dev/null || echo "")
   else
     fail "onecli secrets create failed — try manually with -v output to debug" 2
   fi
+fi
+
+# --- Phase 2.5: assign secret to all detected agents ---
+#
+# OneCLI's "all" secretMode does NOT auto-include secrets on injection
+# (verified empirically against v1.18.6). Each secret must be explicitly
+# assigned to each agent that should be able to use it. Doing so flips
+# the agent into "selective" mode automatically.
+#
+# Uses `onecli agents set-secrets` which REPLACES the list, so we
+# fetch current assignments first and append the new secret if missing.
+
+assign_secret_to_agent() {
+  local agent_id=$1 agent_label=$2 secret_id=$3
+  # Fetch current secret IDs assigned to this agent
+  local current
+  current=$(onecli agents secrets --id "$agent_id" 2>/dev/null | python3 -c "
+import sys, json
+try:
+  d = json.load(sys.stdin)
+  if isinstance(d, dict): d = d.get('data', [])
+  print(','.join(d))
+except Exception:
+  print('')
+" 2>/dev/null || echo "")
+
+  # Already assigned?
+  case ",$current," in
+    *",$secret_id,"*) log "  agent '$agent_label': already assigned"; return 0 ;;
+  esac
+
+  # Build new list (append)
+  local new_list
+  if [ -z "$current" ]; then
+    new_list="$secret_id"
+  else
+    new_list="${current},${secret_id}"
+  fi
+
+  if onecli agents set-secrets --id "$agent_id" --secret-ids "$new_list" >/dev/null 2>&1; then
+    log "  agent '$agent_label': assigned"
+  else
+    warn "  agent '$agent_label': set-secrets failed"
+  fi
+}
+
+if [ -n "$SECRET_ID" ]; then
+  log "assigning secret to all agents..."
+  AGENTS_JSON=$(curl -sf -m 5 "${ONECLI_URL}/api/agents" 2>/dev/null || echo '[]')
+  printf '%s' "$AGENTS_JSON" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+if isinstance(d, dict): d = d.get('data', [])
+for a in d:
+  print(a.get('id', '') + '\t' + a.get('identifier', '?'))
+" 2>/dev/null | while IFS=$'\t' read -r aid aname; do
+    [ -n "$aid" ] && assign_secret_to_agent "$aid" "$aname" "$SECRET_ID"
+  done
+else
+  warn "could not determine secret ID — skipping agent assignment"
 fi
 
 # --- Phase 3: optionally strip the cred from .env ---
