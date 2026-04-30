@@ -61,8 +61,11 @@ log "OneCLI gateway healthy at $ONECLI_URL"
 # --- Phase 1: detect the Anthropic credential in .env ---
 
 get_env_value() {
-  grep -E "^${1}=" "$ENV_FILE" 2>/dev/null | head -1 | cut -d= -f2- \
-    | sed -e 's/^["'"'"']//' -e 's/["'"'"']$//'
+  # Returns the value (or empty) without failing when the var is missing.
+  # set -eo pipefail would otherwise kill the script on a non-matching grep.
+  local raw
+  raw=$( { grep -E "^${1}=" "$ENV_FILE" 2>/dev/null || true; } | head -1 | cut -d= -f2- || true)
+  printf '%s' "$raw" | sed -e 's/^["'"'"']//' -e 's/["'"'"']$//'
 }
 
 TOKEN_OAUTH=$(get_env_value CLAUDE_CODE_OAUTH_TOKEN)
