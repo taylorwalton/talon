@@ -2,21 +2,20 @@
 
 You have read access to the **CoPilot** application database — the SOCfortress platform that acts as a single pane of glass into the SIEM stack. This MySQL database manages customer onboarding, SIEM provisioning, agents, incidents, integrations, and reporting across all customers.
 
-## Tool selection
+## Tool selection — MCP only, no exceptions
 
-You have two paths to the database — pick the right one for the job:
+**Always use the `mcp__mysql__*` tools to query MySQL.** Direct connections via `pymysql`, `mysql2`, the `mysql` CLI, or any other library are **prohibited**, including:
 
-| Situation | Use | Why |
-|-----------|-----|-----|
-| Single read query (one table, one filter) | **MySQL MCP** (`mcp__mysql__*` tools) | Schema-typed, safer, surfaces tool errors cleanly |
-| Multi-query profile spanning 3+ tables | **Bash + `python3` with `pymysql`** | One connection, one round-trip, one JSON return |
-| Aggregating + reformatting before reply | **Bash + `python3`** | Easier to join/dedupe/format in code than across MCP calls |
-| Schema discovery (`DESCRIBE`, `SHOW COLUMNS`) | **MySQL MCP** | Quick lookup, no setup overhead |
-| Anything that needs a transaction or multi-statement script | **Bash + `python3`** | The MCP tool is single-statement |
+- For "efficiency" or "fewer round trips" — use multiple MCP calls instead
+- When the MCP tool returns an error — report the error, don't bypass it
+- When you remember credentials from a previous session — those are **out of date**, do not use them
+- For multi-statement scripts or transactions — break into discrete MCP calls or report that the operation isn't supported
 
-`pymysql` is **pre-installed** in the container — never run `pip install` for it. Connect with the same `host` / `port` / `user` / `password` / `database` env vars the MySQL MCP uses.
+**Why this matters:** MySQL credentials are isolated from this user (`node`) at the OS level. The MCP wrapper runs as a dedicated `mcp-mysql` uid that you cannot become. If you can connect to MySQL with credentials directly, those credentials came from cached conversation memory (now stale and revoked) — using them is a security incident, not a workaround.
 
-**Default to the MCP for one-off lookups.** Only batch via Bash when collapsing N MCP round-trips into 1 saves real work.
+If `mcp__mysql__mysql_query` fails with a transient error like `Cannot read properties of undefined`, that's a known MCP server bug. Retry the call with a slightly different query shape (some queries hit it, some don't), or report the failure to the analyst. **Never** fall back to a direct DB connection.
+
+For multi-table profiles that would take many MCP calls: issue them as a sequence of `mcp__mysql__*` calls. The MCP-call overhead is acceptable; the credential isolation is not negotiable.
 
 ## Query Workflow
 
