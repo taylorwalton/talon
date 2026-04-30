@@ -80,6 +80,7 @@ Talon is an automated AI SOC analyst built by <a href="https://www.socfortress.c
 │  copilot-mcp        — CoPilot REST API write-back          │
 │  wazuh-mcp          — Wazuh manager API (agents, rules, SCA) │
 │  velociraptor-mcp   — Velociraptor DFIR (artifacts, VQL, collections) │
+│  shuffle-mcp        — Shuffle SOAR catalog (3,000+ apps, agent runs) │
 │  ollama (optional)  — local LLM for sensitive event data   │
 └────────────────────────────────────────────────────────────┘
 ```
@@ -113,7 +114,7 @@ See [docs/ANON_PROXY.md](docs/ANON_PROXY.md) for a full walkthrough of the proxy
 
 If [Ollama](https://ollama.com) is running on the same host, Talon automatically routes raw event interpretation through a local model rather than the cloud. This keeps the most sensitive step — reading the full raw event and extracting IOCs — entirely on-premises.
 
-The agent checks for Ollama at startup. If it's not running, the investigation continues without it — no errors, no configuration required. See step 12 of the deployment guide below for setup.
+The agent checks for Ollama at startup. If it's not running, the investigation continues without it — no errors, no configuration required. See step 13 of the deployment guide below for setup.
 
 ---
 
@@ -297,7 +298,18 @@ The Velociraptor MCP server gives the agent direct DFIR capability — querying 
 
 > **Note:** Set `VELOCIRAPTOR_SSL_VERIFY=false` in `velociraptor-mcp/.env` if your Velociraptor server uses a self-signed certificate.
 
-### 12. Configure local LLM analysis (optional)
+### 12. Configure Shuffle MCP credentials (optional)
+
+```bash
+bash shuffle-mcp/setup.sh
+# Edit shuffle-mcp/.env — set SHUFFLE_URL and SHUFFLE_API_KEY
+```
+
+The Shuffle MCP server gives the agent interactive access to Shuffle's 3,000+ SaaS app catalog — `RunAppAgentTool` and `GetExecutionResultTool` for natural-language driving of any authenticated app, plus `AuthenticateTool` and `GetAppsTool` for discovery. Use it for mid-investigation tool calls (e.g. "look up this user's email via Outlook search," "post a Slack thread to #soc," "open a Jira ticket"). This is separate from CoPilot's notification-dispatch path — that path goes through `mcp__copilot__DispatchNotificationsTool`.
+
+> **Note:** Cloud users typically set `SHUFFLE_URL=https://shuffler.io`. Self-hosted users use their own region/instance. The `SHUFFLE_API_KEY` should be the same admin-scoped key configured in CoPilot's Shuffle connector. Skip this step if you don't use Shuffle — Talon will start without the MCP and continue with the other tools.
+
+### 13. Configure local LLM analysis (optional)
 
 Talon can route raw SIEM event analysis through an open-source LLM instead of the Claude cloud model. Combined with the anonymizing proxy — which replaces PII with session tokens before any LLM call — this keeps sensitive data interpretation off Anthropic's API entirely.
 
@@ -360,7 +372,7 @@ cp ollama/.env.example ollama/.env
 
 ---
 
-### 13. Set up MemPalace persistent memory
+### 14. Set up MemPalace persistent memory
 
 MemPalace gives the SOC agent long-term memory — past investigation outcomes, asset metadata, confirmed false positives, and IOC history are stored in a local ChromaDB + SQLite knowledge graph and retrieved automatically at the start of each investigation.
 
@@ -378,13 +390,13 @@ This creates the local venv and the `mempalace-data/` directory where the palace
 
 > **Note:** `mempalace-data/` is gitignored and persists across container restarts. The writable mount entry added in Step 6 is what allows the agent to write to it. Back up `mempalace-data/` alongside your other `.env` files.
 
-### 14. Build the container
+### 15. Build the container
 
 ```bash
 CONTAINER_RUNTIME=docker ./container/build.sh
 ```
 
-### 15. Start the service
+### 16. Start the service
 
 **macOS:**
 ```bash
@@ -450,7 +462,7 @@ systemctl --user enable --now talon
 loginctl enable-linger
 ```
 
-### 16. Verify
+### 17. Verify
 
 ```bash
 # /health is unauthenticated
@@ -490,6 +502,7 @@ curl -s -N -X POST http://localhost:3100/message \
 | `wazuh-mcp/.env` | Wazuh manager API credentials — gitignored |
 | `velociraptor-mcp/.env` | Velociraptor API config path — gitignored |
 | `velociraptor-mcp/api.config.yaml` | Velociraptor API client config — gitignored, copy from server |
+| `shuffle-mcp/.env` | Shuffle SOAR API credentials — gitignored, optional |
 | `ollama/.env` | Optional Ollama host override — gitignored, omit if using defaults |
 | `mempalace-data/` | MemPalace palace data (ChromaDB + SQLite) — gitignored, back up separately |
 | `.env` | `CLAUDE_CODE_OAUTH_TOKEN`, `WEBHOOK_URL`, `WEBHOOK_SECRET` — gitignored |
