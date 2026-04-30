@@ -289,8 +289,11 @@ function buildVolumeMounts(
     );
     if (!mcpMount) continue;
 
-    const fileMounts: Array<{ host: string; staging: string; visible: string }> =
-      [];
+    const fileMounts: Array<{
+      host: string;
+      staging: string;
+      visible: string;
+    }> = [];
 
     // Primary .env (always)
     const hostEnvPath = path.join(mcpMount.hostPath, '.env');

@@ -28,9 +28,23 @@ RUN apt-get update && apt-get install -y \
     python3-venv \
     && rm -rf /var/lib/apt/lists/*
 
-# pymysql is intentionally NOT installed — direct DB connections from the
-# agent (node uid) bypass the MCP isolation pattern. Use mcp__mysql__* tools
-# only; see /workspace/extra/mysql/CLAUDE.md for the tool-selection rule.
+# pymysql lives in a venv owned by mcp-mysql (mode 700) so the agent
+# (node uid) cannot import it. The /usr/local/bin/mysql-query wrapper
+# (installed below) sudos to mcp-mysql, sources /etc/mcp-secrets/mysql.env,
+# and runs the python script — agent gets JSON results, never sees creds.
+# See /workspace/extra/mysql/CLAUDE.md for the doctrine on when to use this
+# vs. the mcp__mysql__* tools.
+#
+# The mcp-mysql user is created later in the per-MCP isolation block; we
+# install pymysql + helper scripts here but defer chown until after the
+# user exists.
+RUN python3 -m venv /opt/mysql-tools \
+    && /opt/mysql-tools/bin/pip install --quiet pymysql \
+    && mkdir -p /opt/mysql-tools/lib
+
+COPY mysql-tools/mysql_query.py /opt/mysql-tools/lib/mysql_query.py
+COPY mysql-tools/mysql-query /usr/local/bin/mysql-query
+RUN chmod 0755 /usr/local/bin/mysql-query
 
 # Install opensearch-mcp-server into a system venv (used by the SIEM MCP wrapper and anon proxy)
 RUN python3 -m venv /opt/opensearch-mcp \
@@ -104,7 +118,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends sudo \
     # Mode 700 means no other user can list or traverse this dir.
     && mkdir -p /etc/mcp-staging \
     && chown root:root /etc/mcp-staging \
-    && chmod 0700 /etc/mcp-staging
+    && chmod 0700 /etc/mcp-staging \
+    # Lock down /opt/mysql-tools (pymysql venv + mysql_query.py) to
+    # mcp-mysql only. Agent (node) cannot list, enter, or import from
+    # this dir. The /usr/local/bin/mysql-query wrapper sudos to mcp-mysql
+    # to use it. chmod -R go-rwx leaves owner perms intact while removing
+    # all access for group + other.
+    && chown -R mcp-mysql:mcp-mysql /opt/mysql-tools \
+    && chmod -R go-rwx /opt/mysql-tools
 
 # Create app directory
 WORKDIR /app

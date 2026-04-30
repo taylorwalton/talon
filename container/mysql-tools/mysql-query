@@ -1,0 +1,75 @@
+#!/bin/bash
+# mysql-query — credentialed MySQL helper for the agent.
+#
+# Reads SQL from stdin (or -e/-f), executes against the CoPilot MySQL
+# database using credentials isolated to the mcp-mysql uid, returns
+# results as JSON on stdout.
+#
+# The agent (node uid) cannot read /etc/mcp-secrets/mysql.env. This
+# wrapper escalates via sudo to mcp-mysql, sources the credentials in
+# the privileged context, and runs pymysql against them. The agent
+# never sees host/user/password — only the resulting rows.
+#
+# Usage:
+#   mysql-query <<< "SELECT * FROM agents LIMIT 10"
+#   echo "SELECT 1" | mysql-query
+#   mysql-query -e "SHOW TABLES"
+#   mysql-query -f script.sql
+#   mysql-query -h
+#
+# Multi-statement scripts (separated by ';') return a JSON array, one
+# entry per statement. Single-statement input returns a single JSON
+# object: {"statement": "...", "rowcount": N, "rows": [...]}.
+
+set -euo pipefail
+
+# === Re-exec as mcp-mysql via sudo ===
+# When invoked by node (or any non-mcp-mysql user), sudo back to ourselves
+# under the mcp-mysql uid. NOPASSWD configured in /etc/sudoers.d/mcp-isolation.
+if [ "$(id -un)" != "mcp-mysql" ]; then
+    exec sudo -n -u mcp-mysql "$0" "$@"
+fi
+
+# === Running as mcp-mysql below ===
+ISOLATED_ENV="/etc/mcp-secrets/mysql.env"
+if [ ! -f "$ISOLATED_ENV" ]; then
+    echo "mysql-query: $ISOLATED_ENV not found (uid isolation not configured?)" >&2
+    exit 1
+fi
+
+set -a
+# shellcheck source=/dev/null
+. "$ISOLATED_ENV"
+set +a
+
+PY=/opt/mysql-tools/bin/python
+SCRIPT=/opt/mysql-tools/lib/mysql_query.py
+
+if [ ! -x "$PY" ] || [ ! -f "$SCRIPT" ]; then
+    echo "mysql-query: helper not installed at /opt/mysql-tools/" >&2
+    exit 1
+fi
+
+case "${1:-}" in
+    -h|--help)
+        sed -n '2,/^# Multi-statement/p' "$0" | sed 's/^# //;s/^#$//;s/^#//'
+        exit 0
+        ;;
+    -e)
+        [ $# -ge 2 ] || { echo "mysql-query: -e requires SQL string" >&2; exit 1; }
+        printf '%s' "$2" | exec "$PY" "$SCRIPT"
+        ;;
+    -f)
+        [ $# -ge 2 ] || { echo "mysql-query: -f requires file path" >&2; exit 1; }
+        [ -f "$2" ] || { echo "mysql-query: file not found: $2" >&2; exit 1; }
+        exec "$PY" "$SCRIPT" < "$2"
+        ;;
+    "")
+        # SQL on stdin
+        exec "$PY" "$SCRIPT"
+        ;;
+    *)
+        echo "mysql-query: unknown argument '$1'. Use -h for help." >&2
+        exit 1
+        ;;
+esac

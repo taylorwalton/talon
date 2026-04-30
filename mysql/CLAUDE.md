@@ -2,20 +2,47 @@
 
 You have read access to the **CoPilot** application database — the SOCfortress platform that acts as a single pane of glass into the SIEM stack. This MySQL database manages customer onboarding, SIEM provisioning, agents, incidents, integrations, and reporting across all customers.
 
-## Tool selection — MCP only, no exceptions
+## Tool selection
 
-**Always use the `mcp__mysql__*` tools to query MySQL.** Direct connections via `pymysql`, `mysql2`, the `mysql` CLI, or any other library are **prohibited**, including:
+You have two approved paths to MySQL — both keep credentials isolated to the `mcp-mysql` uid. Pick the right one for the job:
 
-- For "efficiency" or "fewer round trips" — use multiple MCP calls instead
-- When the MCP tool returns an error — report the error, don't bypass it
-- When you remember credentials from a previous session — those are **out of date**, do not use them
-- For multi-statement scripts or transactions — break into discrete MCP calls or report that the operation isn't supported
+| Situation | Use | Why |
+|-----------|-----|-----|
+| Single read query (one statement) | **MySQL MCP** (`mcp__mysql__*` tools) | Schema-typed, surfaces tool errors cleanly |
+| Multi-statement scripts / transactions / bulk operations | **`mysql-query` CLI** (Bash) | Single connection, supports `;`-separated statements |
+| MCP returns a transient error (e.g. `Cannot read properties of undefined`) | **`mysql-query` CLI** as fallback | Same auth, different runtime |
+| Schema discovery (`DESCRIBE`, `SHOW COLUMNS`) | **MySQL MCP** | Quick lookup |
 
-**Why this matters:** MySQL credentials are isolated from this user (`node`) at the OS level. The MCP wrapper runs as a dedicated `mcp-mysql` uid that you cannot become. If you can connect to MySQL with credentials directly, those credentials came from cached conversation memory (now stale and revoked) — using them is a security incident, not a workaround.
+### `mysql-query` usage
 
-If `mcp__mysql__mysql_query` fails with a transient error like `Cannot read properties of undefined`, that's a known MCP server bug. Retry the call with a slightly different query shape (some queries hit it, some don't), or report the failure to the analyst. **Never** fall back to a direct DB connection.
+The `mysql-query` command in your `PATH` runs SQL against the same MySQL database the MCP uses, returning JSON. Credentials are managed by the wrapper — you never see them and cannot extract them.
 
-For multi-table profiles that would take many MCP calls: issue them as a sequence of `mcp__mysql__*` calls. The MCP-call overhead is acceptable; the credential isolation is not negotiable.
+```bash
+# SQL via stdin (heredoc)
+mysql-query <<EOF
+SELECT id, alert_name, customer_code, status
+FROM incident_management_alert
+WHERE customer_code = 'lab' AND status = 'New'
+ORDER BY alert_creation_time DESC
+LIMIT 20;
+EOF
+
+# SQL via -e flag
+mysql-query -e "SHOW TABLES"
+
+# SQL from a file
+mysql-query -f /tmp/multi-statement.sql
+```
+
+Output is a JSON object for a single statement, or a JSON array of objects for multi-statement input. Each entry contains `statement`, `rowcount`, and `rows`.
+
+### Prohibited paths
+
+Direct MySQL connections via `pymysql`, `mysql2`, the `mysql` CLI client, or raw socket code are **prohibited and will not work** — these libraries either are not installed or cannot reach `/etc/mcp-secrets/mysql.env`.
+
+If you remember credentials from a previous session, **those are out of date**. The system rotates them and the in-memory copy is stale. Attempting to use them indicates a session memory leak, not a usable workaround.
+
+For full credential containment, use the `mcp__mysql__*` tools first; fall back to `mysql-query` only when the MCP cannot express what you need (multi-statement, transactions, large bulk reads).
 
 ## Query Workflow
 
