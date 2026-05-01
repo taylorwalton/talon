@@ -21,13 +21,14 @@ the rest:
 
 1. Looks up the customer's notification routes
 2. Filters by trigger + severity threshold
-3. Formats the message body per channel
-4. Dispatches via SMTP (direct) or Shuffle (Slack/Outlook/Teams/etc.)
+3. Formats the message body
+4. Dispatches via Shuffle to the customer's authenticated apps
+   (Slack, Teams, Outlook, Gmail, ServiceNow, PagerDuty, etc.)
 5. Records the outcome in `notification_dispatch_log`
 6. Enforces idempotency (re-runs are no-ops)
 
 You don't need to query the routes table. You don't need to format the
-message. You don't need to call Slack or SMTP or Shuffle yourself.
+message. You don't need to call Slack, email, or Shuffle yourself.
 
 ---
 
@@ -108,8 +109,8 @@ The endpoint returns a JSON body like:
   "skipped": 0,
   "failed": 0,
   "outcomes": [
-    {"route_id": 1, "route_name": "SOC Slack #alerts", "channel": "slack_webhook", "status": "sent", "latency_ms": 312},
-    {"route_id": 3, "route_name": "IR email", "channel": "smtp_email", "status": "sent", "latency_ms": 1840}
+    {"route_id": 1, "route_name": "SOC Slack #alerts", "channel": "shuffle", "status": "sent", "latency_ms": 312, "shuffle_execution_id": "exec-abc123"},
+    {"route_id": 3, "route_name": "IR Outlook distribution", "channel": "shuffle", "status": "sent", "latency_ms": 1840, "shuffle_execution_id": "exec-def456"}
   ]
 }
 ```
@@ -119,7 +120,7 @@ The endpoint returns a JSON body like:
 | Field | Meaning | What to do |
 |-------|---------|------------|
 | `routes_matched: 0` | Customer has no rules for this trigger/severity | Nothing — expected for many customers |
-| `failed > 0` | One or more channels errored (Slack 4xx, SMTP timeout, etc.) | Mention briefly in your final summary to the analyst (e.g. "note: 1 of 3 notifications failed — check the dispatch log") |
+| `failed > 0` | One or more dispatches errored (Shuffle 4xx, kickoff timeout, etc.) | Mention briefly in your final summary to the analyst (e.g. "note: 1 of 3 notifications failed — check the dispatch log") |
 | `skipped > 0` | Idempotency hit — these were already dispatched | Don't worry about it — means the agent ran twice for the same alert |
 
 If the curl itself fails (network error, 5xx from CoPilot, JSON parse
@@ -138,8 +139,8 @@ secondary.
 ## What you do **not** need to do
 
 - ❌ Query `customer_notification_route` directly
-- ❌ Look up Slack webhook URLs or SMTP recipients
-- ❌ Format messages for specific channels
+- ❌ Look up Slack channels, email addresses, or app handles
+- ❌ Format messages for specific apps (Shuffle does this)
 - ❌ Insert rows into `notification_dispatch_log` yourself
 - ❌ Implement retry logic
 - ❌ Track which alerts you've already notified about — CoPilot does
@@ -168,20 +169,6 @@ mcp__copilot__DispatchNotificationsTool({
     alert_name: "Curl process start",
     report_url: "https://copilot.example.com/incident-management/alert/147"
 })
-```
-
-Response (typical, SMTP route):
-```json
-{
-  "success": true,
-  "routes_matched": 1,
-  "dispatched": 1,
-  "skipped": 0,
-  "failed": 0,
-  "outcomes": [
-    {"route_id": 4, "route_name": "SOC IR distribution", "channel": "smtp_email", "status": "sent", "latency_ms": 1840}
-  ]
-}
 ```
 
 Response (typical, Shuffle route to Slack):
