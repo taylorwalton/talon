@@ -59,32 +59,23 @@ Arguments:
 |-------|-----------|--------|
 | `customer_code` | yes | from the alert (you queried it in step 1) |
 | `alert_id` | yes | the integer alert ID, same as `ai_analyst_report.alert_id` |
-| `trigger` | yes | pick one — see the table below |
+| `trigger` | yes | always `investigation_complete` (see below) |
 | `severity_assessment` | yes | same value you wrote to `ai_analyst_report.severity_assessment` |
 | `summary` | yes | same value you wrote to `ai_analyst_report.summary` |
 | `alert_name` | recommended | the original alert title — helps recipients identify it |
 | `report_url` | optional | deep link to the report in CoPilot if you have one |
 
-### Picking the trigger
+### The trigger field
 
-You **must** pick one trigger value per call. Use the rules below:
+Always pass `trigger: "investigation_complete"`. The trigger is the
+*event type* that caused the dispatch — there's only one event type
+right now (Talon-driven investigations). Severity gating happens on
+the route side via each route's `min_severity`, not here.
 
-| If your report's `severity_assessment` is... | Pick this trigger |
-|----------------------------------------------|-------------------|
-| `Critical` or `High`                         | `severity_critical_or_high` |
-| `Medium`, `Low`, or `Informational`          | `investigation_complete` |
-
-Only fire **one** trigger per investigation. CoPilot's routes are
-configured per-trigger, so:
-
-- A customer with no routes at all → empty result, that's fine
-- A customer with only an `investigation_complete` route → they'll see
-  every investigation regardless of severity
-- A customer with both routes → high-severity investigations fire the
-  `severity_critical_or_high` route; lower ones fire `investigation_complete`
-
-You only call with the trigger that matches the severity. Do not call
-twice (once per trigger). The dispatch service handles route matching.
+If you ever see another trigger value documented (e.g. for analyst-
+review hooks or scheduled-sweep findings), use that one instead. The
+mapping is: one trigger value per dispatch source, not per severity
+band.
 
 ### Required fields
 
@@ -171,7 +162,7 @@ Critical):
 mcp__copilot__DispatchNotificationsTool({
     customer_code: "00001",
     alert_id: 147,
-    trigger: "severity_critical_or_high",
+    trigger: "investigation_complete",
     severity_assessment: "Critical",
     summary: "BloodHound CE healthcheck firing rule 200288 (curl). Confirmed false positive — Docker HEALTHCHECK on piHole agent 088. Recommend rule exception.",
     alert_name: "Curl process start",
