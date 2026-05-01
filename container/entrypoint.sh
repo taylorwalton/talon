@@ -23,6 +23,29 @@ if [ "$(id -u)" = "0" ] && [ -f /workspace/project/.env ]; then
   mount --bind /dev/null /workspace/project/.env
 fi
 
+# --- Map container's 'node' user to the host uid ---
+#
+# When the host process runs as a non-root, non-1000 uid (e.g. uid 501 on
+# macOS), bind-mounted files arrive owned by that uid. Without this remap:
+#   - the container's /etc/passwd has no entry for uid 501
+#   - sudo refuses to run because the calling uid has no username
+#   - the sudoers rule `node ALL=(mcp-*) NOPASSWD: ALL` never matches
+#     because there's nobody named 'node' at the calling uid
+#   - every per-MCP wrapper that uses `sudo -u mcp-X` fails silently
+#     and Claude Code reports "No such tool available"
+#
+# Remap the existing 'node' username to use $RUN_UID/$RUN_GID. Files
+# baked into the image at uid 1000 get re-chowned so the agent can read
+# its own home dir and workspace.
+if [ "$(id -u)" = "0" ] && [ -n "$RUN_UID" ] \
+   && [ "$RUN_UID" != "$(id -u node 2>/dev/null || echo 1000)" ]; then
+  groupmod -o -g "$RUN_GID" node 2>/dev/null || true
+  usermod -o -u "$RUN_UID" -g "$RUN_GID" node 2>/dev/null || true
+  for d in /home/node /workspace; do
+    [ -d "$d" ] && find "$d" -not -uid "$RUN_UID" -exec chown -h "$RUN_UID:$RUN_GID" {} + 2>/dev/null || true
+  done
+fi
+
 # --- Per-MCP credential isolation ---
 # Container-runner mounts each MCP's secret file(s) to two paths via docker -v:
 #
