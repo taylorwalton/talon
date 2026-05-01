@@ -85,15 +85,42 @@ function runPalaceCall(payload: object): Promise<unknown> {
         );
         return;
       }
-      try {
-        resolve(JSON.parse(stdout));
-      } catch (e) {
-        reject(
-          new Error(
-            `palace-call.sh returned non-JSON: ${stdout.slice(0, 200)}`,
-          ),
-        );
+      // Defensive parse: mempalace's own logging or chromadb internals
+      // can occasionally print to stdout despite palace_call.py's
+      // contextlib.redirect_stdout. Rather than fail the whole call when
+      // a stray log line precedes the JSON, scan from the bottom for the
+      // last `{...}` line and parse that. The python wrapper always
+      // writes the response as the final line.
+      const tryParse = (raw: string): unknown | undefined => {
+        try {
+          return JSON.parse(raw);
+        } catch {
+          return undefined;
+        }
+      };
+      const direct = tryParse(stdout.trim());
+      if (direct !== undefined) {
+        resolve(direct);
+        return;
       }
+      const lines = stdout
+        .split('\n')
+        .map((l) => l.trim())
+        .filter((l) => l.startsWith('{') && l.endsWith('}'));
+      for (let i = lines.length - 1; i >= 0; i--) {
+        const parsed = tryParse(lines[i]);
+        if (parsed !== undefined) {
+          logger.warn(
+            { discarded: stdout.slice(0, 200) },
+            'palace-call.sh emitted non-JSON noise on stdout; recovered last JSON line',
+          );
+          resolve(parsed);
+          return;
+        }
+      }
+      reject(
+        new Error(`palace-call.sh returned non-JSON: ${stdout.slice(0, 200)}`),
+      );
     });
 
     child.stdin.write(JSON.stringify(payload));

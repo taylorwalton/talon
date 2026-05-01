@@ -18,6 +18,7 @@ Errors are printed to stderr; stdout is reserved for the JSON response so
 the node caller can parse it cleanly.
 """
 
+import contextlib
 import json
 import sys
 import traceback
@@ -42,28 +43,35 @@ def main() -> int:
         print(json.dumps({"error": f"mempalace not installed: {e}"}))
         return 3
 
+    # Redirect mempalace's stdout output (chromadb internals + mempalace's
+    # own print() lines like "Filed drawer: ..." or "Fixed N BLOB seq_ids
+    # in embeddings") to stderr for the duration of the tool call. Our
+    # caller (src/palace-client.ts) parses stdout as JSON, so any non-JSON
+    # noise on stdout breaks the round trip. Stderr is fine — node logs
+    # it at debug.
     try:
-        if op == "add_drawer":
-            result = m.tool_add_drawer(
-                wing=req["wing"],
-                room=req["room"],
-                content=req["content"],
-                source_file=req.get("source_file"),
-                added_by=req.get("added_by", "copilot-review"),
-            )
-        elif op == "search":
-            result = m.tool_search(
-                query=req["query"],
-                limit=int(req.get("limit", 5)),
-                wing=req.get("wing"),
-                room=req.get("room"),
-            )
-        elif op == "delete_drawer":
-            # Used by CoPilot's durability sweeper to forget expired
-            # one-off lessons so they stop surfacing in palace searches.
-            result = m.tool_delete_drawer(drawer_id=req["drawer_id"])
-        else:
-            result = {"error": f"unknown op: {op}"}
+        with contextlib.redirect_stdout(sys.stderr):
+            if op == "add_drawer":
+                result = m.tool_add_drawer(
+                    wing=req["wing"],
+                    room=req["room"],
+                    content=req["content"],
+                    source_file=req.get("source_file"),
+                    added_by=req.get("added_by", "copilot-review"),
+                )
+            elif op == "search":
+                result = m.tool_search(
+                    query=req["query"],
+                    limit=int(req.get("limit", 5)),
+                    wing=req.get("wing"),
+                    room=req.get("room"),
+                )
+            elif op == "delete_drawer":
+                # Used by CoPilot's durability sweeper to forget expired
+                # one-off lessons so they stop surfacing in palace searches.
+                result = m.tool_delete_drawer(drawer_id=req["drawer_id"])
+            else:
+                result = {"error": f"unknown op: {op}"}
     except KeyError as e:
         result = {"error": f"missing required field: {e}"}
     except Exception as e:
