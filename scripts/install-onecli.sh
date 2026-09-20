@@ -119,22 +119,34 @@ export PATH="$HOME/.local/bin:$PATH"
 
 # --- Phase 1: install gateway + CLI if missing ---
 
+# The Docker stack and the CLI binary install separately and can go missing
+# independently — wiping ~/.onecli for a clean re-bootstrap leaves the binary
+# behind in /usr/local/bin. Gate each on its own artifact, or a re-run after
+# that wipe installs nothing and fails at the Phase 3 probe instead.
+
 ALREADY_INSTALLED=0
-if command -v onecli >/dev/null 2>&1; then
-  log "OneCLI binary present: $(command -v onecli)"
+if [ -f "$ONECLI_COMPOSE" ]; then
+  log "OneCLI stack present: $ONECLI_COMPOSE"
   ALREADY_INSTALLED=1
 else
-  log "installing OneCLI gateway..."
+  log "installing OneCLI stack (version $ONECLI_VERSION)..."
   # Explicit https:// — curl defaults to http:// when no scheme is
   # given, which fails immediately on hosts that don't expose port 80.
+  # ONECLI_VERSION is exported above; the installer reads it to choose
+  # between the legacy all-in-one compose and the 2.x split compose.
   curl -fsSL https://onecli.sh/install | sh || fail "gateway install failed" 1
+fi
 
+if command -v onecli >/dev/null 2>&1; then
+  log "OneCLI binary present: $(command -v onecli)"
+else
   log "installing OneCLI CLI..."
   curl -fsSL https://onecli.sh/cli/install | sh || fail "CLI install failed" 1
 
   # Re-export PATH in case installer just dropped binary in ~/.local/bin
   export PATH="$HOME/.local/bin:$PATH"
   command -v onecli >/dev/null 2>&1 || fail "onecli still not in PATH after install" 1
+  ALREADY_INSTALLED=0
 fi
 
 # --- Phase 1.5: pin the OneCLI version and reject the 2.x split stack ---
