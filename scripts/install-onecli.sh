@@ -12,6 +12,13 @@
 #   5. If no API key, print bootstrap instructions and exit cleanly
 #
 # Optional env vars:
+#   ONECLI_VERSION       OneCLI release to install/pin (default: 1.24.0).
+#                        OneCLI 2.0 split the all-in-one container into
+#                        separate web/api/gateway services and moved the
+#                        REST API from :10254 to :10256. Every /api/* call
+#                        in this repo (agents, secrets, grants) targets the
+#                        1.x layout, so we pin to the last known-good 1.x
+#                        release rather than tracking `latest`.
 #   ONECLI_PORT          gateway port (default: 10254)
 #   ONECLI_SCHEME        http | https (default: http). Set https when
 #                        the gateway is fronted by TLS in production.
@@ -27,8 +34,16 @@
 #   1 = install failed (network, missing curl, etc.)
 #   2 = gateway did not become healthy after install
 #   3 = required prerequisite missing (curl, write access)
+#   4 = incompatible OneCLI 2.x split stack installed (see remediation)
 
 set -euo pipefail
+
+# Last OneCLI release whose all-in-one container serves the 1.x layout this
+# repo talks to (REST API + gateway on 10254/10255). Exported so
+# https://onecli.sh/install picks docker-compose.legacy.yml: its installer
+# routes any major < 2 to the legacy all-in-one compose file.
+ONECLI_VERSION="${ONECLI_VERSION:-1.24.0}"
+export ONECLI_VERSION
 
 ONECLI_PORT="${ONECLI_PORT:-10254}"
 # Scheme used when assembling candidate gateway URLs. Defaults to `http`
@@ -71,6 +86,29 @@ log()  { printf '[install-onecli] %s\n' "$*"; }
 warn() { printf '[install-onecli] WARN: %s\n' "$*" >&2; }
 fail() { printf '[install-onecli] FAIL: %s\n' "$*" >&2; exit "${2:-1}"; }
 
+# Idempotent set of KEY=value in a .env file. Returns 0 when the file
+# changed (caller may need to restart containers), 1 when already correct.
+# Rewrites via a temp file rather than `sed -i`, whose syntax differs
+# between GNU and BSD sed — this helper now runs on macOS too.
+set_env_kv() {
+  local file=$1 key=$2 value=$3
+  if grep -qE "^${key}=" "$file" 2>/dev/null; then
+    local cur
+    cur=$(grep -E "^${key}=" "$file" | head -1 | cut -d= -f2- | tr -d '"' | tr -d "'")
+    [ "$cur" = "$value" ] && return 1
+    local tmp
+    tmp=$(mktemp "${file}.XXXXXX")
+    awk -v k="$key" -v v="$value" \
+      'index($0, k "=") == 1 { print k "=" v; next } { print }' "$file" > "$tmp"
+    mv "$tmp" "$file"
+    log "  $key: $cur -> $value"
+    return 0
+  fi
+  printf '%s=%s\n' "$key" "$value" >> "$file"
+  log "  $key=$value (added)"
+  return 0
+}
+
 # --- Phase 0: prerequisites ---
 
 command -v curl >/dev/null || fail "curl not in PATH — install curl first" 3
@@ -97,6 +135,57 @@ else
   # Re-export PATH in case installer just dropped binary in ~/.local/bin
   export PATH="$HOME/.local/bin:$PATH"
   command -v onecli >/dev/null 2>&1 || fail "onecli still not in PATH after install" 1
+fi
+
+# --- Phase 1.5: pin the OneCLI version and reject the 2.x split stack ---
+#
+# https://onecli.sh/install reads ONECLI_VERSION for the run that invokes it
+# but never writes it to $HOME/.onecli/.env. Without the pin in that file, a
+# later bare `docker compose up` resolves ${ONECLI_VERSION:-latest} to
+# `latest` and silently upgrades the host across the 2.0 boundary.
+#
+# 2.0 replaced the all-in-one `onecli` container with web + api + gateway +
+# runner services and moved the REST API to :10256. This repo's /api/agents,
+# /api/secrets and /api/health calls all assume the 1.x all-in-one layout, so
+# an already-installed 2.x stack is a hard stop with rollback instructions
+# rather than a confusing "no reachable gateway" timeout in Phase 3.
+
+ONECLI_RESTART_NEEDED=0
+
+if [ -f "$ONECLI_COMPOSE" ] && grep -qE '^\s+image:.*onecli-(web|api|gateway):' "$ONECLI_COMPOSE"; then
+  warn "OneCLI 2.x split stack detected at $ONECLI_COMPOSE"
+  warn "  2.x serves the web UI on :${ONECLI_PORT} and the REST API on :10256."
+  warn "  NanoClaw targets the 1.x all-in-one layout (API + gateway on 10254/10255)."
+  cat >&2 <<EOF
+
+ROLLBACK to the pinned 1.x stack (destroys the 2.x OneCLI database —
+agents, tokens and vault secrets must be re-created afterwards):
+
+  docker compose -p onecli -f $ONECLI_COMPOSE down
+  docker volume ls --filter name=onecli      # confirm before removing
+  docker volume rm onecli_pgdata onecli_app-data
+  ONECLI_VERSION=$ONECLI_VERSION curl -fsSL https://onecli.sh/install | sh
+  bash scripts/install-onecli.sh
+
+To deliberately run 2.x instead, re-run with ONECLI_VERSION=<2.x version>
+— but the /api/* calls in scripts/ will need porting to the new ports first.
+
+EOF
+  fail "refusing to configure an incompatible OneCLI stack" 4
+fi
+
+if [ -d "$ONECLI_HOME_DIR" ]; then
+  [ -f "$ONECLI_COMPOSE_ENV" ] || touch "$ONECLI_COMPOSE_ENV" 2>/dev/null || true
+  if [ -f "$ONECLI_COMPOSE_ENV" ]; then
+    log "pinning OneCLI version in $ONECLI_COMPOSE_ENV"
+    if set_env_kv "$ONECLI_COMPOSE_ENV" ONECLI_VERSION "$ONECLI_VERSION"; then
+      ONECLI_RESTART_NEEDED=1
+    else
+      log "  ONECLI_VERSION already pinned to $ONECLI_VERSION"
+    fi
+  fi
+else
+  warn "$ONECLI_HOME_DIR not found — cannot persist ONECLI_VERSION pin"
 fi
 
 # --- Phase 2: persist ~/.local/bin in shell rc files (only if CLI lives there) ---
@@ -128,8 +217,6 @@ fi
 # driver_opts block if it's not already present. Skipped on macOS (no
 # docker0 interface and no MTU issue with Desktop's vmnet).
 
-ONECLI_RESTART_NEEDED=0
-
 if [ -d /sys/class/net/docker0 ]; then
   BRIDGE_IP=$(ip -4 addr show docker0 2>/dev/null | awk '/inet /{print $2}' | cut -d/ -f1 | head -1)
 
@@ -140,25 +227,6 @@ if [ -d /sys/class/net/docker0 ]; then
 
   if [ -n "$BRIDGE_IP" ] && [ -d "$ONECLI_HOME_DIR" ]; then
     [ -f "$ONECLI_COMPOSE_ENV" ] || touch "$ONECLI_COMPOSE_ENV" 2>/dev/null
-
-    # Helper: idempotent set in a .env file
-    set_env_kv() {
-      local file=$1 key=$2 value=$3
-      if grep -qE "^${key}=" "$file" 2>/dev/null; then
-        local cur
-        cur=$(grep -E "^${key}=" "$file" | head -1 | cut -d= -f2- | tr -d '"' | tr -d "'")
-        if [ "$cur" != "$value" ]; then
-          sed -i "s|^${key}=.*|${key}=${value}|" "$file"
-          log "  $key: $cur -> $value"
-          return 0
-        fi
-        return 1
-      else
-        printf '%s=%s\n' "$key" "$value" >> "$file"
-        log "  $key=$value (added)"
-        return 0
-      fi
-    }
 
     log "configuring OneCLI compose-dir env: $ONECLI_COMPOSE_ENV"
     if set_env_kv "$ONECLI_COMPOSE_ENV" ONECLI_BIND_HOST "$BRIDGE_IP"; then ONECLI_RESTART_NEEDED=1; fi
@@ -191,7 +259,11 @@ if [ -d /sys/class/net/docker0 ]; then
 fi
 
 if [ "$ONECLI_RESTART_NEEDED" -eq 1 ] && [ -f "$ONECLI_COMPOSE" ]; then
-  log "recreating OneCLI containers + network to apply config..."
+  log "recreating OneCLI containers + network to apply config (version $ONECLI_VERSION)..."
+  # Pull explicitly: `up -d` only fetches an image it doesn't already have
+  # locally, so a changed ONECLI_VERSION pin needs this to actually land.
+  docker compose -p onecli -f "$ONECLI_COMPOSE" pull >/dev/null 2>&1 || \
+    warn "image pull failed — continuing with locally cached images"
   if docker compose -p onecli -f "$ONECLI_COMPOSE" down >/dev/null 2>&1 \
      && docker compose -p onecli -f "$ONECLI_COMPOSE" up -d >/dev/null 2>&1; then
     log "OneCLI recreated"
@@ -237,6 +309,14 @@ if [ -z "$ONECLI_URL" ]; then
   warn "no reachable gateway found on any of: ${CANDIDATES[*]}"
   warn "check: docker ps | grep onecli"
   warn "check: ps aux | grep -i onecli | grep -v grep"
+  # A 2.x stack answers :${ONECLI_PORT} with the web UI but serves no
+  # /api/health there, so the probe above times out while `docker ps` looks
+  # perfectly healthy. Name that case explicitly.
+  if docker ps --format '{{.Names}}' 2>/dev/null | grep -qE '^onecli-(web|api|gateway)$'; then
+    warn "onecli-web/api/gateway containers are running: this is the OneCLI 2.x"
+    warn "split stack, whose REST API lives on :10256, not :${ONECLI_PORT}."
+    warn "Re-run after rolling back to ONECLI_VERSION=$ONECLI_VERSION (see README)."
+  fi
   exit 2
 fi
 
@@ -478,6 +558,7 @@ fi
 echo
 log "DONE."
 log "  Gateway:        $ONECLI_URL (healthy)"
+log "  OneCLI version: $ONECLI_VERSION (pinned in $ONECLI_COMPOSE_ENV)"
 log "  CLI version:    $(onecli version 2>/dev/null | grep -oE '"version"[^,]*' | head -1 | tr -d '"' | sed 's/version://;s/[ ]//g' || echo unknown)"
 log "  Already done:   $([ "$ALREADY_INSTALLED" -eq 1 ] && echo yes || echo no)"
 log "  Auth status:    $AUTH_STATUS"

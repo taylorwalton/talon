@@ -198,6 +198,17 @@ What it does (idempotent — safe to re-run):
 - Probes the gateway URL (Docker bridge IP on Linux, loopback on macOS)
 - Detects groups under `groups/` and creates a OneCLI agent for each one (excluding `main`, which uses OneCLI's default agent)
 - Persists `ONECLI_URL` and `ONECLI_API_KEY` to `.env`
+- Pins `ONECLI_VERSION` in `~/.onecli/.env` so a later `docker compose up` can't drift
+
+**Version pin.** Talon targets OneCLI **1.24.0**, the all-in-one container that
+serves the REST API and gateway on ports 10254/10255. OneCLI 2.0 split that into
+separate `web` / `api` / `gateway` services and moved the REST API to port 10256,
+which breaks every `/api/agents`, `/api/secrets` and `/api/health` call in
+`scripts/`. The installer writes the pin into `~/.onecli/.env` — upstream's
+installer only honours `ONECLI_VERSION` for its own run — and refuses to
+configure a host where a 2.x stack is already installed, printing rollback
+instructions instead. Override with `ONECLI_VERSION=<version> bash
+scripts/install-onecli.sh` once the scripts are ported.
 
 If you skip this step, Talon falls back to injecting `CLAUDE_CODE_OAUTH_TOKEN` directly into the container as an env var. The fallback works in most cases, but in some environments the in-container Claude CLI requires a manual `claude /login` to bootstrap on first run. With OneCLI present, that manual step is never needed.
 
