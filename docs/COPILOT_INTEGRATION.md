@@ -1,3 +1,6 @@
+> [!WARNING]
+> **Superseded:** Talon is replaced by talon-analyst, SOCFortress's new AI SOC analyst for CoPilot. This repository is no longer maintained. See [Migrating to talon-analyst](../README.md#migrating-to-talon-analyst).
+
 # NanoClaw × CoPilot Integration
 
 > **Status:** In progress — MCP write-back tools under development in CoPilot.
