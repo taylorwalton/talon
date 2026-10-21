@@ -1,3 +1,6 @@
+> [!WARNING]
+> **Superseded:** Talon is replaced by **talon-analyst**, SOCFortress's new AI SOC analyst for CoPilot. This repository is no longer maintained; contact [SOCFortress](https://www.socfortress.co) for talon-analyst.
+
 <h1 align="center">
 
 <a href="https://www.socfortress.co"><img src="assets/talon-final-1024.png" alt="Talon" width="400"></a>
@@ -22,6 +25,35 @@ Talon is an automated AI SOC analyst built by <a href="https://www.socfortress.c
 </h4>
 
 ---
+
+## How CoPilot integrates now
+
+CoPilot keeps the same Talon connector, so pointing the connector's URL at talon-analyst is all the connector needs.
+
+CoPilot's **Talon v2** setting (off by default) unlocks the newer features: chat, approval-gated actions, Velociraptor endpoint actions and per-customer automation. With Talon v2 off, the original connector contract is unchanged, so upgrading CoPilot does not affect a running Talon.
+
+## Migrating to talon-analyst
+
+A high-level checklist. Follow SOCFortress's talon-analyst install guide for the details.
+
+1. Upgrade CoPilot.
+2. Install talon-analyst on the same VM as a separate Docker Compose project, following SOCFortress's install guide.
+3. Create the CoPilot service user and the read-only database user for talon-analyst.
+4. Run talon-analyst on a different port from Talon during the switch.
+5. Repoint the CoPilot Talon connector URL and API key at talon-analyst.
+6. Verify by running "Investigate with AI Analyst" on a test alert.
+7. Stop Talon and archive its install.
+
+## What doesn't carry over
+
+- **Palace memory and chat sessions.** Talon's MemPalace memory and chat sessions are not migrated. Durable lessons are re-seeded from CoPilot.
+- **The 15-minute catch-all sweep.** talon-analyst does not sweep for uninvestigated alerts on a schedule. Alerts are investigated where CoPilot's AI triggers are turned on.
+
+---
+
+# Legacy documentation (Talon)
+
+> Everything below describes the original NanoClaw-based Talon and is kept for reference only. It is no longer maintained.
 
 ---
 

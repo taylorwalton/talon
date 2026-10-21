@@ -1,3 +1,6 @@
+> [!WARNING]
+> **Superseded:** Talon is replaced by talon-analyst, SOCFortress's new AI SOC analyst for CoPilot. This repository is no longer maintained. See [Migrating to talon-analyst](README.md#migrating-to-talon-analyst).
+
 <p align="center">
   <img src="assets/nanoclaw-logo.png" alt="NanoClaw" width="400">
 </p>
