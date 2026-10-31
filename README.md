@@ -1,5 +1,5 @@
 > [!WARNING]
-> **Superseded:** Talon is replaced by **talon-analyst**, SOCFortress's new AI SOC analyst for CoPilot. This repository is no longer maintained; contact [SOCFortress](https://www.socfortress.co) for talon-analyst.
+> **Superseded:** Talon is replaced by **talon-analyst**, SOCFortress's new AI SOC analyst for CoPilot. This repository is no longer maintained; see the new Talon at [Get Talon](https://docs.socfortress.co/power-features/ai-analyst) for talon-analyst.
 
 <h1 align="center">
 
